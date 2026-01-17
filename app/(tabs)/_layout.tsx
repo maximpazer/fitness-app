@@ -38,13 +38,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="calendar" color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="logger"
-        options={{
-          title: 'Logger',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="list.bullet" color={color} />,
-        }}
-      />
+
       <Tabs.Screen
         name="chat"
         options={{
