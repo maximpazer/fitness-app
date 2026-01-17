@@ -17,9 +17,9 @@ export const dashboardService = {
 
             const { data: weeklyWorkouts } = await supabase
                 .from('completed_workouts')
-                .select('duration_minutes, created_at')
+                .select('duration_minutes, completed_at')
                 .eq('user_id', userId)
-                .gte('created_at', startOfCurrentWeek)
+                .gte('completed_at', startOfCurrentWeek)
 
             const weeklyCount = weeklyWorkouts?.length || 0
             const weeklyMinutes = weeklyWorkouts?.reduce((acc, curr) => acc + (curr.duration_minutes || 0), 0) || 0
@@ -29,7 +29,7 @@ export const dashboardService = {
                 .from('completed_workouts')
                 .select('*')
                 .eq('user_id', userId)
-                .order('created_at', { ascending: false })
+                .order('completed_at', { ascending: false })
                 .limit(3)
 
             // 4. Get Weight History (Last 7 entries)
@@ -57,4 +57,99 @@ export const dashboardService = {
             return null
         }
     },
+
+    async getWeeklyVolume(userId: string, weeks: number = 12) {
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - (weeks * 7));
+
+        const { data: workouts, error } = await supabase
+            .from('completed_workouts')
+            .select(`
+                completed_at,
+                workout_exercises (
+                    workout_sets (
+                        weight_kg,
+                        reps
+                    )
+                )
+            `)
+            .eq('user_id', userId)
+            .gte('completed_at', startDate.toISOString())
+            .order('completed_at', { ascending: true });
+
+        if (error) throw error;
+
+        // Group by week and calculate total volume (weight × reps)
+        const weeklyData: { week: string; volume: number }[] = [];
+        const weekMap = new Map<string, number>();
+
+        (workouts || []).forEach((workout: any) => {
+            const weekStart = startOfWeek(new Date(workout.completed_at));
+            const weekKey = weekStart.toISOString().split('T')[0];
+
+            let workoutVolume = 0;
+            (workout.workout_exercises || []).forEach((ex: any) => {
+                (ex.workout_sets || []).forEach((set: any) => {
+                    if (set.weight_kg && set.reps) {
+                        workoutVolume += set.weight_kg * set.reps;
+                    }
+                });
+            });
+
+            weekMap.set(weekKey, (weekMap.get(weekKey) || 0) + workoutVolume);
+        });
+
+        weekMap.forEach((volume, week) => {
+            weeklyData.push({ week, volume });
+        });
+
+        return weeklyData;
+    },
+
+    async getWorkoutFrequency(userId: string, weeks: number = 12) {
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - (weeks * 7));
+
+        const { data: workouts, error } = await supabase
+            .from('completed_workouts')
+            .select('completed_at')
+            .eq('user_id', userId)
+            .gte('completed_at', startDate.toISOString());
+
+        if (error) throw error;
+
+        // Count workouts per week
+        const weekMap = new Map<string, number>();
+
+        (workouts || []).forEach((workout) => {
+            const weekStart = startOfWeek(new Date(workout.completed_at));
+            const weekKey = weekStart.toISOString().split('T')[0];
+            weekMap.set(weekKey, (weekMap.get(weekKey) || 0) + 1);
+        });
+
+        const frequencyData: { week: string; count: number }[] = [];
+        weekMap.forEach((count, week) => {
+            frequencyData.push({ week, count });
+        });
+
+        return frequencyData;
+    },
+
+    async getTodayWorkoutStatus(userId: string, planDayId: string) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayISO = today.toISOString();
+
+        const { data, error } = await supabase
+            .from('completed_workouts')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('plan_day_id', planDayId)
+            .gte('completed_at', todayISO)
+            .limit(1);
+
+        if (error) throw error;
+
+        return (data && data.length > 0);
+    }
 }

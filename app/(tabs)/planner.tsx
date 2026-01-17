@@ -151,7 +151,7 @@ export default function Planner() {
                                 <Text className="text-3xl font-bold text-white">Your Plan</Text>
                                 <TouchableOpacity
                                     className="bg-gray-800 px-4 py-2 rounded-lg"
-                                    onPress={() => Alert.alert('Options', 'Edit plan options coming soon')}
+                                    onPress={() => router.push(`/plans/edit/${activePlan.id}`)}
                                 >
                                     <Text className="text-blue-400 font-bold">Edit</Text>
                                 </TouchableOpacity>

@@ -37,6 +37,8 @@ export const aiService = {
     - Include compound and isolation exercises
     - Progressive overload friendly
     - Appropriate volume for fitness level
+    - Use ONLY numeric values for target_reps_min, target_reps_max, target_sets, and rest_seconds
+    - Do NOT use strings like "AMRAP" or "failure" - use actual numbers
     
     Return ONLY valid JSON (no markdown) with this EXACT structure:
     {
@@ -103,11 +105,11 @@ export const aiService = {
                 return {
                     exercise_id: foundEx.id,
                     order_in_workout: day.exercises.indexOf(ex) + 1,
-                    target_sets: ex.target_sets,
-                    target_reps_min: ex.target_reps_min,
-                    target_reps_max: ex.target_reps_max,
-                    target_rpe: ex.target_rpe,
-                    rest_seconds: ex.rest_seconds,
+                    target_sets: typeof ex.target_sets === 'number' ? ex.target_sets : 3,
+                    target_reps_min: typeof ex.target_reps_min === 'number' ? ex.target_reps_min : undefined,
+                    target_reps_max: typeof ex.target_reps_max === 'number' ? ex.target_reps_max : undefined,
+                    target_rpe: typeof ex.target_rpe === 'number' ? ex.target_rpe : undefined,
+                    rest_seconds: typeof ex.rest_seconds === 'number' ? ex.rest_seconds : 90,
                     notes: ex.notes
                 };
             }).filter((e: any) => e !== null)
