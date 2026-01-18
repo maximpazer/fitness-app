@@ -248,8 +248,23 @@ export default function WorkoutSession() {
 
             {/* Header */}
             <View className="px-4 py-3 bg-gray-900 border-b border-gray-800 flex-row justify-between items-center">
-                <View>
-                    <Text className="text-white font-bold text-lg">{planDay?.day_name || 'Workout'}</Text>
+                <TouchableOpacity
+                    onPress={() => {
+                        Alert.alert(
+                            "Exit Workout",
+                            "Are you sure you want to exit? Your progress for this session will be lost.",
+                            [
+                                { text: "Resume", style: "cancel" },
+                                { text: "Exit", style: "destructive", onPress: () => router.back() }
+                            ]
+                        );
+                    }}
+                    className="w-10 h-10 items-center justify-center -ml-2"
+                >
+                    <Ionicons name="close" size={28} color="#9ca3af" />
+                </TouchableOpacity>
+                <View className="flex-1 px-2">
+                    <Text className="text-white font-bold text-lg" numberOfLines={1}>{planDay?.day_name || 'Workout'}</Text>
                     <Text className="text-gray-400 text-xs">{format(new Date(), 'MMM d, yyyy')}</Text>
                 </View>
                 <View className="items-end">
@@ -288,24 +303,28 @@ export default function WorkoutSession() {
 
                                     <View className="flex-1 px-1">
                                         <TextInput
-                                            className="bg-gray-800 text-white text-center py-2 rounded-md font-bold text-lg"
+                                            className="bg-gray-800/80 text-white text-center py-2 rounded-md font-bold text-lg border border-transparent focus:border-blue-500/50"
                                             keyboardType="numeric"
                                             value={set.weight}
                                             onChangeText={(v) => handleSetChange(exIndex, setIndex, 'weight', v)}
                                             maxLength={5}
                                             selectTextOnFocus
+                                            placeholder="0"
+                                            placeholderTextColor="#4b5563"
                                             returnKeyType="next"
                                         />
                                     </View>
 
                                     <View className="flex-1 px-1">
                                         <TextInput
-                                            className="bg-gray-800 text-white text-center py-2 rounded-md font-bold text-lg"
+                                            className="bg-gray-800/80 text-white text-center py-2 rounded-md font-bold text-lg border border-transparent focus:border-blue-500/50"
                                             keyboardType="numeric"
                                             value={set.reps}
                                             onChangeText={(v) => handleSetChange(exIndex, setIndex, 'reps', v)}
                                             maxLength={3}
                                             selectTextOnFocus
+                                            placeholder="0"
+                                            placeholderTextColor="#4b5563"
                                             returnKeyType="done"
                                         />
                                     </View>

@@ -35,4 +35,12 @@ export const authService = {
     async resetPassword(email: string) {
         return await supabase.auth.resetPasswordForEmail(email)
     },
+
+    async updateEmail(newEmail: string) {
+        return await supabase.auth.updateUser({ email: newEmail })
+    },
+
+    async updatePassword(newPassword: string) {
+        return await supabase.auth.updateUser({ password: newPassword })
+    },
 }

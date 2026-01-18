@@ -108,5 +108,23 @@ export const workoutService = {
         }
 
         return workout;
+    },
+
+    async getWorkoutSummary(workoutId: string) {
+        const { data, error } = await supabase
+            .from('completed_workouts')
+            .select(`
+                *,
+                workout_exercises (
+                    *,
+                    exercise:exercises (name),
+                    workout_sets (*)
+                )
+            `)
+            .eq('id', workoutId)
+            .single();
+
+        if (error) throw error;
+        return data;
     }
 };

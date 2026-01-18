@@ -2,6 +2,7 @@ import { useAuthContext } from '@/context/AuthContext';
 import { dashboardService } from '@/services/dashboard.service';
 import { metricsService } from '@/services/metrics.service';
 import { plannerService } from '@/services/planner.service';
+import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -15,6 +16,7 @@ export default function Dashboard() {
   const [data, setData] = useState<any>(null);
   const [activePlan, setActivePlan] = useState<any>(null);
   const [todayWorkout, setTodayWorkout] = useState<any>(null);
+  const [tomorrowWorkout, setTomorrowWorkout] = useState<any>(null);
   const [weightData, setWeightData] = useState<any>(null);
   const [latestMetrics, setLatestMetrics] = useState<any>(null);
   const [showMetricsModal, setShowMetricsModal] = useState(false);
@@ -34,10 +36,17 @@ export default function Dashboard() {
       const plan = await plannerService.getActivePlan(user.id);
       setActivePlan(plan);
       if (plan && plan.days && plan.days.length > 0) {
-        // Simple heuristic: first training day
+        // Simple heuristic: first training day for today
         const firstTrainingDay = plan.days.find((d: any) => d.day_type === 'training');
-        const workout = firstTrainingDay || plan.days[0];
+        const todayIdx = plan.days.findIndex((d: any) => d.id === (firstTrainingDay?.id || plan.days[0].id));
+        const workout = plan.days[todayIdx];
+
         setTodayWorkout(workout);
+
+        // Find tomorrow's workout (next training day)
+        const nextTrainingDay = plan.days.slice(todayIdx + 1).find((d: any) => d.day_type === 'training')
+          || plan.days.find((d: any) => d.day_type === 'training'); // Loop back if needed
+        setTomorrowWorkout(nextTrainingDay);
 
         // Check if today's workout is completed
         if (workout) {
@@ -139,32 +148,58 @@ export default function Dashboard() {
             </TouchableOpacity>
           </View>
 
-          {/* Today's Workout Card */}
+          {/* Today's Workout Section */}
           {todayWorkout ? (
-            <TouchableOpacity
-              className={`p-6 rounded-3xl mb-6 ${todayWorkoutCompleted ? 'bg-green-600' : 'bg-blue-600'}`}
-              onPress={handleStartWorkout}
-              disabled={todayWorkoutCompleted}
-            >
-              <View className="flex-row justify-between items-start">
-                <View className="flex-1">
-                  <Text className={`font-medium mb-1 ${todayWorkoutCompleted ? 'text-green-100' : 'text-blue-100'}`}>
-                    {todayWorkoutCompleted ? "Today's Workout - Completed!" : "Today's Workout"}
-                  </Text>
-                  <Text className="text-3xl font-bold text-white mb-2">
-                    {todayWorkout.day_name || `Day ${todayWorkout.day_number}`}
-                  </Text>
-                  <View className={`flex-row items-center self-start px-3 py-1 rounded-full ${todayWorkoutCompleted ? 'bg-green-500/30' : 'bg-blue-500/30'}`}>
-                    <Text className="text-white text-xs font-medium">
-                      {todayWorkout.exercises?.length || 0} exercises • {todayWorkout.day_type}
+            <View className="mb-6">
+              <TouchableOpacity
+                className={`p-6 rounded-3xl ${todayWorkoutCompleted ? 'bg-green-600/20 border border-green-500/30' : 'bg-blue-600'}`}
+                onPress={handleStartWorkout}
+                disabled={todayWorkoutCompleted}
+              >
+                <View className="flex-row justify-between items-center">
+                  <View className="flex-1">
+                    <Text className={`font-medium mb-1 ${todayWorkoutCompleted ? 'text-green-400' : 'text-blue-100'}`}>
+                      {todayWorkoutCompleted ? "Today's Workout Done" : "Today's Workout"}
+                    </Text>
+                    <Text className={`${todayWorkoutCompleted ? 'text-xl' : 'text-3xl'} font-bold text-white mb-2`}>
+                      {todayWorkout.day_name || `Day ${todayWorkout.day_number}`}
+                    </Text>
+                    {!todayWorkoutCompleted && (
+                      <View className="flex-row items-center bg-blue-500/30 self-start px-3 py-1 rounded-full">
+                        <Text className="text-white text-xs font-medium">
+                          {todayWorkout.exercises?.length || 0} exercises • {todayWorkout.day_type}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  {!todayWorkoutCompleted && (
+                    <View className="w-12 h-12 bg-white/20 rounded-full items-center justify-center">
+                      <Text className="text-2xl">🔥</Text>
+                    </View>
+                  )}
+                  {todayWorkoutCompleted && (
+                    <Text className="text-lg font-medium text-green-400">Completed</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+
+              {todayWorkoutCompleted && tomorrowWorkout && (
+                <TouchableOpacity
+                  className="bg-gray-900 border border-gray-800 p-5 rounded-3xl mt-3 flex-row justify-between items-center"
+                  onPress={() => router.push(`/workout/${tomorrowWorkout.id}`)}
+                >
+                  <View>
+                    <Text className="text-gray-500 font-medium text-xs mb-1 uppercase tracking-wider">Up Next: Tomorrow</Text>
+                    <Text className="text-xl font-bold text-gray-200">
+                      {tomorrowWorkout.day_name || `Day ${tomorrowWorkout.day_number}`}
                     </Text>
                   </View>
-                </View>
-                <View className="w-12 h-12 bg-white/20 rounded-full items-center justify-center">
-                  <Text className="text-2xl">{todayWorkoutCompleted ? '✅' : '🔥'}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
+                  <View className="bg-gray-800 px-3 py-1 rounded-full">
+                    <Text className="text-gray-400 text-xs">{tomorrowWorkout.exercises?.length || 0} exercises</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            </View>
           ) : (
             <View className="bg-gray-900 p-6 rounded-3xl mb-6 border border-gray-800">
               <Text className="text-gray-400 text-center">No active workout plan</Text>
@@ -255,17 +290,24 @@ export default function Dashboard() {
           <Text className="text-lg font-bold text-white mb-4">Recent History</Text>
           {data?.recentActivity?.length > 0 ? (
             data.recentActivity.map((workout: any, i: number) => (
-              <View key={i} className="bg-gray-900 p-4 rounded-2xl mb-3 flex-row items-center border border-gray-800">
-                <View className="h-12 w-12 bg-green-900/30 rounded-full items-center justify-center mr-4">
-                  <Text className="text-xl">✅</Text>
+              <TouchableOpacity
+                key={i}
+                onPress={() => router.push(`/workout/summary/${workout.id}` as any)}
+                className="bg-gray-900 p-4 rounded-2xl mb-3 flex-row items-center justify-between border border-gray-800 active:bg-gray-800"
+              >
+                <View className="flex-row items-center flex-1">
+                  <View className="h-10 w-10 bg-blue-900/20 rounded-xl items-center justify-center mr-4">
+                    <Ionicons name="calendar-outline" size={20} color="#3b82f6" />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="font-semibold text-white" numberOfLines={1}>{workout.workout_name || 'Workout'}</Text>
+                    <Text className="text-gray-400 text-sm">
+                      {format(new Date(workout.completed_at), 'MMM d')} • {workout.duration_minutes} mins
+                    </Text>
+                  </View>
                 </View>
-                <View>
-                  <Text className="font-semibold text-white">{workout.workout_name || 'Workout'}</Text>
-                  <Text className="text-gray-400 text-sm">
-                    {format(new Date(workout.completed_at), 'MMM d')} • {workout.duration_minutes} mins
-                  </Text>
-                </View>
-              </View>
+                <Ionicons name="chevron-forward" size={18} color="#4b5563" />
+              </TouchableOpacity>
             ))
           ) : (
             <View className="bg-gray-900 p-6 rounded-2xl items-center border border-gray-800">
