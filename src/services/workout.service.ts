@@ -2,17 +2,14 @@ import { WorkoutExercise, WorkoutSet } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
 
 export const workoutService = {
-    async getExerciseHistory(exerciseId: string, userId: string): Promise<(WorkoutExercise & { sets: WorkoutSet[] }) | null> {
+    async getExerciseHistory(exerciseId: string, userId: string): Promise<(WorkoutExercise & { sets: WorkoutSet[], workout?: { completed_at: string } }) | null> {
         // Fetch the last set of this exercise from completed workouts
-        // This is complex because we need to join workout_exercises -> workouts
-
-        // Workaround: 
         const { data: recentWorkouts } = await supabase
             .from('completed_workouts')
-            .select('id')
+            .select('id, completed_at')
             .eq('user_id', userId)
             .order('completed_at', { ascending: false })
-            .limit(5); // Check last 5 workouts to find this exercise
+            .limit(10); // Check last 10 workouts to find this exercise
 
         if (!recentWorkouts || recentWorkouts.length === 0) return null;
 
@@ -21,21 +18,22 @@ export const workoutService = {
         const { data: exerciseData } = await supabase
             .from('workout_exercises')
             .select(`
-            *,
-            sets:workout_sets (*)
-        `)
+                *,
+                workout:completed_workouts (completed_at),
+                sets:workout_sets (*)
+            `)
             .eq('exercise_id', exerciseId)
-            .in('workout_id', workoutIds) as { data: (WorkoutExercise & { sets: WorkoutSet[] })[] | null; error: any };
+            .in('workout_id', workoutIds) as { data: (WorkoutExercise & { sets: WorkoutSet[], workout: { completed_at: string } })[] | null; error: any };
 
         if (!exerciseData || exerciseData.length === 0) return null;
 
         // Find the one belonging to the most recent workout
-        for (const wid of workoutIds) {
-            const match = exerciseData.find(e => e.workout_id === wid);
+        for (const rw of recentWorkouts) {
+            const match = exerciseData.find(e => e.workout_id === rw.id);
             if (match) {
                 // Sort sets
                 if (match.sets) match.sets.sort((a, b) => a.set_number - b.set_number);
-                return match as (WorkoutExercise & { sets: WorkoutSet[] });
+                return match;
             }
         }
 
@@ -126,5 +124,29 @@ export const workoutService = {
 
         if (error) throw error;
         return data;
+    },
+
+    async getDetailedRecentHistory(userId: string, limit: number = 5) {
+        const { data, error } = await supabase
+            .from('completed_workouts')
+            .select(`
+                id,
+                workout_name,
+                completed_at,
+                duration_minutes,
+                workout_exercises (
+                    exercise:exercises (name),
+                    sets:workout_sets (
+                        reps,
+                        weight_kg
+                    )
+                )
+            `)
+            .eq('user_id', userId)
+            .order('completed_at', { ascending: false })
+            .limit(limit);
+
+        if (error) throw error;
+        return data || [];
     }
 };

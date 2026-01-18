@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 import '../global.css';
 
+import { WorkoutLoggerOverlay } from '@/components/WorkoutLoggerOverlay';
 import { AuthProvider, useAuthContext } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -53,14 +54,22 @@ function RootLayoutNav() {
         </Stack>
       )}
       <StatusBar style="auto" />
+      <WorkoutLoggerOverlay />
     </ThemeProvider>
   );
 }
 
+import { WorkoutProvider } from '@/context/WorkoutContext';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootLayoutNav />
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <WorkoutProvider>
+          <RootLayoutNav />
+        </WorkoutProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }

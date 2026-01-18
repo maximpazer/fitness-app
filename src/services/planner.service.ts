@@ -59,17 +59,16 @@ export const plannerService = {
             throw error;
         }
 
-        // Sort days and exercises
-        if (plans && plans.days) {
-            plans.days.sort((a, b) => a.day_number - b.day_number);
-            plans.days.forEach(day => {
+        if (plans && (plans as any).days) {
+            (plans as any).days.sort((a: any, b: any) => a.day_number - b.day_number);
+            (plans as any).days.forEach((day: any) => {
                 if (day.exercises) {
-                    day.exercises.sort((a, b) => a.order_in_workout - b.order_in_workout);
+                    day.exercises.sort((a: any, b: any) => a.order_in_workout - b.order_in_workout);
                 }
             });
         }
 
-        return plans as FullPlan;
+        return plans as any as FullPlan;
     },
 
     async getPlanById(planId: string): Promise<FullPlan | null> {
@@ -94,25 +93,24 @@ export const plannerService = {
             throw error;
         }
 
-        // Sort days and exercises
-        if (plan && plan.days) {
-            plan.days.sort((a: any, b: any) => a.day_number - b.day_number);
-            plan.days.forEach((day: any) => {
+        if (plan && (plan as any).days) {
+            (plan as any).days.sort((a: any, b: any) => a.day_number - b.day_number);
+            (plan as any).days.forEach((day: any) => {
                 if (day.exercises) {
                     day.exercises.sort((a: any, b: any) => a.order_in_workout - b.order_in_workout);
                 }
             });
         }
 
-        return plan as FullPlan;
+        return plan as any as FullPlan;
     },
 
     async deactivateCurrentPlan(userId: string) {
-        await supabase
+        await (supabase
             .from('workout_plans')
-            .update({ is_active: false })
+            .update({ is_active: false } as any)
             .eq('user_id', userId)
-            .eq('is_active', true);
+            .eq('is_active', true) as any);
     },
 
     async createPlan(userId: string, planData: CreatePlanDTO) {
@@ -121,7 +119,7 @@ export const plannerService = {
         await this.deactivateCurrentPlan(userId);
 
         // 2. Create Plan
-        const { data: newPlan, error: planError } = await supabase
+        const { data: newPlan, error: planError } = await (supabase
             .from('workout_plans')
             .insert({
                 user_id: userId,
@@ -130,16 +128,16 @@ export const plannerService = {
                 duration_weeks: planData.duration_weeks,
                 is_active: true,
                 created_at: new Date().toISOString()
-            })
+            } as any)
             .select()
-            .single();
+            .single() as any);
 
         if (planError) throw planError;
         if (!newPlan) throw new Error('Failed to create plan');
 
         // 3. Create Days & Exercises
         for (const day of planData.days) {
-            const { data: newDay, error: dayError } = await supabase
+            const { data: newDay, error: dayError } = await (supabase
                 .from('plan_days')
                 .insert({
                     plan_id: newPlan.id,
@@ -147,9 +145,9 @@ export const plannerService = {
                     day_name: day.day_name,
                     day_type: day.day_type,
                     notes: day.notes
-                })
+                } as any)
                 .select()
-                .single();
+                .single() as any);
 
             if (dayError) throw dayError;
             if (!newDay) throw new Error('Failed to create day');
@@ -167,9 +165,9 @@ export const plannerService = {
                     notes: ex.notes
                 }));
 
-                const { error: exError } = await supabase
+                const { error: exError } = await (supabase
                     .from('plan_exercises')
-                    .insert(exercisesToInsert);
+                    .insert(exercisesToInsert as any) as any);
 
                 if (exError) throw exError;
             }
@@ -180,14 +178,14 @@ export const plannerService = {
 
     async updatePlan(planId: string, planData: CreatePlanDTO) {
         // 1. Update top-level plan details
-        const { error: planError } = await supabase
+        const { error: planError } = await (supabase
             .from('workout_plans')
             .update({
                 name: planData.name,
                 description: planData.description,
                 duration_weeks: planData.duration_weeks
-            })
-            .eq('id', planId);
+            } as any)
+            .eq('id', planId) as any);
 
         if (planError) throw planError;
 
@@ -228,7 +226,7 @@ export const plannerService = {
                     .eq('id', dayId);
             } else {
                 // Insert new day
-                const { data: newDay, error: insertError } = await supabase
+                const { data: newDay, error: insertError } = await (supabase
                     .from('plan_days')
                     .insert({
                         plan_id: planId,
@@ -238,10 +236,10 @@ export const plannerService = {
                         notes: day.notes
                     } as any)
                     .select()
-                    .single();
+                    .single() as any);
 
                 if (insertError) throw insertError;
-                dayId = newDay.id;
+                dayId = (newDay as any).id;
             }
 
             // 4. Handle Exercises for this day
@@ -253,7 +251,7 @@ export const plannerService = {
             // But usually history is linked by exercise_id + workout date/completed_workout.
 
             // Delete old exercises for this day
-            await supabase.from('plan_exercises').delete().eq('plan_day_id', dayId);
+            await (supabase.from('plan_exercises').delete().eq('plan_day_id', dayId) as any);
 
             // Insert new exercises
             if (day.exercises && day.exercises.length > 0) {
@@ -269,9 +267,9 @@ export const plannerService = {
                     notes: ex.notes
                 }));
 
-                const { error: exError } = await supabase
+                const { error: exError } = await (supabase
                     .from('plan_exercises')
-                    .insert(exercisesToInsert as any); // Typescript might complain about dayId being potentially undefined?
+                    .insert(exercisesToInsert as any) as any);
 
                 if (exError) throw exError;
             }
@@ -293,8 +291,8 @@ export const plannerService = {
         if (error) throw error;
 
         // Sort exercises
-        if (data && data.exercises) {
-            data.exercises.sort((a, b) => a.order_in_workout - b.order_in_workout);
+        if (data && (data as any)!.exercises) {
+            (data as any)!.exercises.sort((a: any, b: any) => a.order_in_workout - b.order_in_workout);
         }
 
         return data as PlanDay & {
@@ -314,15 +312,47 @@ export const plannerService = {
         if (error) {
             // If foreign key constraint error, deactivate instead
             if (error.code === '23503') {
-                const { error: updateError } = await supabase
+                const { error: updateError } = await (supabase
                     .from('workout_plans')
                     .update({ is_active: false } as any)
-                    .eq('id', planId);
+                    .eq('id', planId) as any);
 
                 if (updateError) throw updateError;
                 return; // Successfully deactivated
             }
             throw error;
         }
+    },
+    async updatePlanDayExercises(planDayId: string, exercises: any[]) {
+        // 1. Delete existing plan exercises for this day
+        await (supabase.from('plan_exercises').delete().eq('plan_day_id', planDayId) as any);
+
+        // 2. Insert new set of exercises based on what was done in the session
+        const toInsert = exercises.map((ex, idx) => ({
+            plan_day_id: planDayId,
+            exercise_id: ex.exerciseId,
+            order_in_workout: idx,
+            target_sets: ex.sets.length,
+            target_reps_min: parseInt(ex.sets[0]?.reps) || 10,
+            target_reps_max: null,
+            target_rpe: null,
+            rest_seconds: 60,
+            notes: ''
+        }));
+
+        const { error } = await (supabase
+            .from('plan_exercises')
+            .insert(toInsert as any) as any);
+
+        if (error) throw error;
+    },
+    async getAllExercises() {
+        const { data, error } = await (supabase
+            .from('exercises')
+            .select('*')
+            .order('name') as any);
+
+        if (error) throw error;
+        return data;
     }
 };

@@ -1,5 +1,5 @@
 import { useAuthContext } from '@/context/AuthContext';
-import { aiService } from '@/services/ai.service';
+import { useWorkout } from '@/context/WorkoutContext';
 import { FullPlan, plannerService } from '@/services/planner.service';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -14,6 +14,7 @@ export default function Planner() {
     const [generating, setGenerating] = useState(false);
     const [activePlan, setActivePlan] = useState<FullPlan | null>(null);
     const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
+    const { initWorkout, activeWorkout: sessionActive } = useWorkout();
 
     const loadPlan = useCallback(async () => {
         if (!user) return;
@@ -33,18 +34,11 @@ export default function Planner() {
     }, [loadPlan]);
 
     const handleGenerateAIPlan = async () => {
-        if (!user) return;
-        setGenerating(true);
-        try {
-            await aiService.generateWorkoutPlan(user.id);
-            await loadPlan();
-            Alert.alert('Success', 'Your AI Workout Plan is ready!');
-        } catch (error: any) {
-            console.error(error);
-            Alert.alert('Generation Failed', error.message || 'Could not create plan. Please try again.');
-        } finally {
-            setGenerating(false);
-        }
+        // Redirect to Chat with a special parameter
+        router.push({
+            pathname: '/chat',
+            params: { mode: 'generate_plan' }
+        });
     };
 
     const toggleDay = (dayId: string) => {
@@ -54,16 +48,22 @@ export default function Planner() {
         }));
     };
 
-    const startWorkout = (dayId: string) => {
+    const startWorkout = async (dayId: string) => {
+        if (!user) return;
+
+        let targetId = dayId;
         if (dayId === 'today') {
-            // Find the first training day? Or simply the next incomplete one.
-            // For now, let's just pick the first day of the plan or alert user to choose
             if (activePlan && activePlan.days.length > 0) {
-                // Heuristic: Use first day for "Start Today" if generic
-                router.push(`/workout/${activePlan.days[0].id}`);
+                targetId = activePlan.days[0].id; // Simple heuristic for now
+            } else {
+                return;
             }
-        } else {
-            router.push(`/workout/${dayId}`);
+        }
+
+        try {
+            await initWorkout(user.id, targetId);
+        } catch (e) {
+            Alert.alert("Error", "Could not start workout");
         }
     };
 
@@ -138,7 +138,7 @@ export default function Planner() {
                                 </View>
                                 <TouchableOpacity
                                     className="bg-gray-800 w-full py-4 rounded-full items-center mt-4 border border-gray-700"
-                                    onPress={() => Alert.alert('Coming Soon', 'Custom plan builder is under construction.')}
+                                    onPress={() => router.push('/plans/new')}
                                 >
                                     <Text className="text-white font-bold text-lg">Create Plan</Text>
                                 </TouchableOpacity>

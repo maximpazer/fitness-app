@@ -1,4 +1,5 @@
 import { useAuthContext } from '@/context/AuthContext';
+import { useWorkout } from '@/context/WorkoutContext';
 import { dashboardService } from '@/services/dashboard.service';
 import { metricsService } from '@/services/metrics.service';
 import { plannerService } from '@/services/planner.service';
@@ -23,6 +24,7 @@ export default function Dashboard() {
   const [weightInput, setWeightInput] = useState('');
   const [todayWorkoutCompleted, setTodayWorkoutCompleted] = useState(false);
   const router = useRouter();
+  const { initWorkout } = useWorkout();
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -81,9 +83,13 @@ export default function Dashboard() {
     loadData();
   }, [loadData]);
 
-  const handleStartWorkout = () => {
-    if (todayWorkout) {
-      router.push(`/workout/${todayWorkout.id}`);
+  const handleStartWorkout = async () => {
+    if (user && todayWorkout) {
+      try {
+        await initWorkout(user.id, todayWorkout.id);
+      } catch (e) {
+        Alert.alert('Error', 'Could not start workout');
+      }
     } else {
       Alert.alert('No Workout', 'No workout plan available. Create a plan first!');
     }
@@ -186,7 +192,9 @@ export default function Dashboard() {
               {todayWorkoutCompleted && tomorrowWorkout && (
                 <TouchableOpacity
                   className="bg-gray-900 border border-gray-800 p-5 rounded-3xl mt-3 flex-row justify-between items-center"
-                  onPress={() => router.push(`/workout/${tomorrowWorkout.id}`)}
+                  onPress={() => {
+                    if (user && tomorrowWorkout) initWorkout(user.id, tomorrowWorkout.id);
+                  }}
                 >
                   <View>
                     <Text className="text-gray-500 font-medium text-xs mb-1 uppercase tracking-wider">Up Next: Tomorrow</Text>
