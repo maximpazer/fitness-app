@@ -8,6 +8,7 @@ export type WorkoutSet = {
     reps: string;
     completed: boolean;
     prevWeight?: string;
+    isWarmup?: boolean;
 };
 
 export type Exercise = {
@@ -22,7 +23,17 @@ export type Exercise = {
     instructions?: string[] | null;
     tips?: string[] | null;
     muscle_groups?: string[] | null;
+    category?: string | null;
+    target_muscle?: string | null;
     equipment_needed?: string[] | null;
+    classification?: string | null;
+    mechanics?: string | null;
+    movement_type?: string | null;
+    posture?: string | null;
+    grip?: string | null;
+    load_position?: string | null;
+    laterality?: string | null;
+    force_type?: string | null;
 };
 
 export type ActiveWorkout = {
@@ -142,7 +153,17 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 instructions: ex.exercise?.instructions,
                 tips: ex.exercise?.tips,
                 muscle_groups: ex.exercise?.muscle_groups,
+                category: ex.exercise?.category,
+                target_muscle: ex.exercise?.target_muscle,
                 equipment_needed: ex.exercise?.equipment_needed,
+                classification: ex.exercise?.classification,
+                mechanics: ex.exercise?.mechanics,
+                movement_type: ex.exercise?.movement_type,
+                posture: ex.exercise?.posture,
+                grip: ex.exercise?.grip,
+                load_position: ex.exercise?.load_position,
+                laterality: ex.exercise?.laterality,
+                force_type: ex.exercise?.force_type,
             });
         }
 
@@ -165,8 +186,15 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
             return;
         }
 
-        const newExercises = [...activeWorkout.exercises];
-        newExercises[exIdx].sets[setIdx] = { ...newExercises[exIdx].sets[setIdx], ...data };
+        const newExercises = activeWorkout.exercises.map((ex, i) => {
+            if (i !== exIdx) return ex;
+            const newSets = ex.sets.map((s, j) => {
+                if (j !== setIdx) return s;
+                return { ...s, ...data };
+            });
+            return { ...ex, sets: newSets };
+        });
+
         setActiveWorkout({ ...activeWorkout, exercises: newExercises });
 
         console.log(`Updated exercise ${exIdx} set ${setIdx}:`, newExercises[exIdx].sets[setIdx]);
@@ -174,24 +202,27 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const addSet = (exIdx: number) => {
         if (!activeWorkout) return;
-        const newExercises = [...activeWorkout.exercises];
-        const currentSets = newExercises[exIdx].sets;
-        const lastSet = currentSets[currentSets.length - 1];
-
-        currentSets.push({
-            setNumber: currentSets.length + 1,
-            weight: lastSet ? lastSet.weight : '',
-            reps: lastSet ? lastSet.reps : '',
-            completed: false
+        const newExercises = activeWorkout.exercises.map((ex, i) => {
+            if (i !== exIdx) return ex;
+            const newSets = [...ex.sets, {
+                setNumber: ex.sets.length + 1,
+                weight: ex.sets.length > 0 ? ex.sets[ex.sets.length - 1].weight : '',
+                reps: ex.sets.length > 0 ? ex.sets[ex.sets.length - 1].reps : '',
+                completed: false
+            }];
+            return { ...ex, sets: newSets };
         });
         setActiveWorkout({ ...activeWorkout, exercises: newExercises });
     };
 
     const removeSet = (exIdx: number, setIdx: number) => {
         if (!activeWorkout) return;
-        const newExercises = [...activeWorkout.exercises];
-        newExercises[exIdx].sets.splice(setIdx, 1);
-        newExercises[exIdx].sets.forEach((s, i) => s.setNumber = i + 1);
+        const newExercises = activeWorkout.exercises.map((ex, i) => {
+            if (i !== exIdx) return ex;
+            const newSets = ex.sets.filter((_, j) => j !== setIdx)
+                .map((s, idx) => ({ ...s, setNumber: idx + 1 }));
+            return { ...ex, sets: newSets };
+        });
         setActiveWorkout({ ...activeWorkout, exercises: newExercises });
     };
 
@@ -214,7 +245,17 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
             instructions: exercise.instructions,
             tips: exercise.tips,
             muscle_groups: exercise.muscle_groups,
+            category: exercise.category,
+            target_muscle: exercise.target_muscle,
             equipment_needed: exercise.equipment_needed,
+            classification: exercise.classification,
+            mechanics: exercise.mechanics,
+            movement_type: exercise.movement_type,
+            posture: exercise.posture,
+            grip: exercise.grip,
+            load_position: exercise.load_position,
+            laterality: exercise.laterality,
+            force_type: exercise.force_type,
         }];
         setActiveWorkout({ ...activeWorkout, exercises: newExercises, hasAdHoc: true });
     };

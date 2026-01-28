@@ -34,6 +34,17 @@ export interface Exercise {
     exercisedb_id?: string;
     is_compound?: boolean;
     is_custom?: boolean;
+    classification?: string;
+    mechanics?: string;
+    movement_type?: string;
+    posture?: string;
+    grip?: string;
+    load_position?: string;
+    laterality?: string;
+    force_type?: string;
+    target_muscle?: string;
+    target_region?: string;
+    movement_patterns?: string[];
 }
 
 export interface WorkoutPlan {

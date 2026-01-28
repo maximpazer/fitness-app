@@ -5,32 +5,51 @@ export type Exercise = Database['public']['Tables']['exercises']['Row'];
 
 export const exerciseService = {
     async getExercises(filter?: { category?: string; search?: string; muscleGroups?: string[] }) {
-        let query = supabase
-            .from('exercises')
-            .select('*')
-            .order('name');
+        let allExercises: Exercise[] = [];
+        let from = 0;
+        const limit = 1000;
+        let hasMore = true;
 
-        if (filter?.category && filter.category !== 'All') {
-            query = query.eq('category', filter.category.toLowerCase());
+        while (hasMore) {
+            let query = supabase
+                .from('exercises')
+                .select('*')
+                .order('name')
+                .range(from, from + limit - 1);
+
+            if (filter?.category && filter.category !== 'All') {
+                query = query.eq('category', filter.category.toLowerCase());
+            }
+
+            if (filter?.search) {
+                query = query.ilike('name', `%${filter.search}%`);
+            }
+
+            // Filter by muscle groups (OR logic - show exercises matching ANY selected muscle group)
+            if (filter?.muscleGroups && filter.muscleGroups.length > 0) {
+                query = query.overlaps('muscle_groups', filter.muscleGroups);
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+                console.error('Error fetching exercises:', error);
+                throw error;
+            }
+
+            if (data) {
+                allExercises = [...allExercises, ...(data as Exercise[])];
+                if (data.length < limit) {
+                    hasMore = false;
+                } else {
+                    from += limit;
+                }
+            } else {
+                hasMore = false;
+            }
         }
 
-        if (filter?.search) {
-            query = query.ilike('name', `%${filter.search}%`);
-        }
-
-        // Filter by muscle groups (OR logic - show exercises matching ANY selected muscle group)
-        if (filter?.muscleGroups && filter.muscleGroups.length > 0) {
-            query = query.overlaps('muscle_groups', filter.muscleGroups);
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-            console.error('Error fetching exercises:', error);
-            throw error;
-        }
-
-        return data as Exercise[];
+        return allExercises;
     },
 
     async getExerciseById(id: string) {

@@ -1,6 +1,5 @@
 import { generateGeminiContent } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
-import { exerciseService } from './exercise.service';
 import { CreatePlanDTO, plannerService } from './planner.service';
 
 export const aiService = {
@@ -15,11 +14,13 @@ export const aiService = {
         const profile = profileData as any;
         if (!profile) throw new Error('User profile not found');
 
-        // 2. Fetch Available Exercises (to provide context to AI)
-        // Fetch a subset or names to reduce prompt size, or let AI hallucinate and we map broadly?
-        // Better to fetch all names.
-        const allExercises = await exerciseService.getExercises();
-        const exerciseNames = allExercises.map(e => e.name).join(', ');
+        // 2. Summarize Available Exercises (to provide context to AI without hitting token limits)
+        const { data: categoryStats } = await supabase
+            .from('exercises')
+            .select('category, muscle_groups');
+
+        const categories = [...new Set((categoryStats as any[])?.map(e => e.category))].join(', ');
+        const muscles = [...new Set((categoryStats as any[])?.flatMap(e => e.muscle_groups))].join(', ');
 
         // 3. Construct Prompt
         const prompt = `
@@ -67,9 +68,9 @@ export const aiService = {
       ]
     }
     
-    IMPORTANT: Use ONLY exercise names from this list where possible:
-    [${exerciseNames}]
-    If a crucial exercise is missing, you may suggest standard ones, but prefer the list.
+    IMPORTANT: You have access to over 3,000 exercises across these categories: ${categories}.
+    Focus on these muscle groups: ${muscles}.
+    Return a balanced plan. If you name an exercise, make sure it's a standard exercise.
     `;
 
         // 4. Call AI
@@ -90,22 +91,21 @@ export const aiService = {
         }
 
         // 5. Map Exercise Names to IDs
+        // Fetch only the exercises that the AI suggested to reduce data transfer
+        const suggestedNames = planData.days.flatMap((d: any) => d.exercises.map((e: any) => e.exercise_name));
+        const { data: matchedExercises } = await supabase
+            .from('exercises')
+            .select('*')
+            .in('name', suggestedNames);
+
         const mappedDays = planData.days.map((day: any) => ({
             ...day,
             exercises: day.exercises.map((ex: any) => {
-                // Find exercise by name (fuzzy match or exact)
-                // For now, simple find
-                const foundEx = allExercises.find(e => e.name.toLowerCase() === ex.exercise_name.toLowerCase())
-                    || allExercises.find(e => e.name.toLowerCase().includes(ex.exercise_name.toLowerCase()));
+                const foundEx = (matchedExercises as any[])?.find(e => e.name.toLowerCase() === ex.exercise_name.toLowerCase())
+                    || (matchedExercises as any[])?.find(e => e.name.toLowerCase().includes(ex.exercise_name.toLowerCase()));
 
-                if (!foundEx) {
-                    // If not found, skip or use a default placeholder? 
-                    // Or maybe we need to create a custom exercise?
-                    // For MVP, if not found, let's filter it out or handle gracefully.
-                    // Let's rely on finding a match, or if not, just pick the first matching category if desperate (unsafe).
-                    // Better: Filter out invalid exercises.
-                    return null;
-                }
+                if (!foundEx) return null;
+
                 return {
                     exercise_id: foundEx.id,
                     order_in_workout: day.exercises.indexOf(ex) + 1,
@@ -144,7 +144,7 @@ export const aiService = {
 
         const profile = profileData as any;
 
-        // 2. Format workout data for the prompt
+        // 2. Format workout data for the prompt, including advanced metadata
         const workoutSummary = workoutData.exercises.map((ex: any) => {
             const completedSets = ex.sets.filter((s: any) => s.is_completed || s.completed);
             if (completedSets.length === 0) return null;
@@ -153,7 +153,10 @@ export const aiService = {
                 `Set ${i + 1}: ${s.weight_kg || s.weight}kg x ${s.reps} reps`
             ).join(', ');
 
-            return `${ex.name || 'Exercise'}: ${setsStr}`;
+            // Include metadata if available (joined or attached to exercise object)
+            const meta = ex.exercise ? ` [Type: ${ex.exercise.classification}, Mechanics: ${ex.exercise.mechanics}, Movement: ${ex.exercise.movement_type}]` : '';
+
+            return `${ex.name || 'Exercise'}${meta}: ${setsStr}`;
         }).filter(Boolean).join('\n');
 
         const prompt = `

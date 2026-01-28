@@ -1,3 +1,4 @@
+import { ExercisePickerModal } from '@/components/ExercisePickerModal';
 import { useAuthContext } from '@/context/AuthContext';
 import { Database } from '@/lib/database.types';
 import { exerciseService } from '@/services/exercise.service';
@@ -5,7 +6,7 @@ import { CreatePlanDTO, plannerService } from '@/services/planner.service';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 type Exercise = Database['public']['Tables']['exercises']['Row'];
@@ -28,10 +29,6 @@ export default function EditPlan() {
     const [allExercises, setAllExercises] = useState<Exercise[]>([]);
     const [showExercisePicker, setShowExercisePicker] = useState(false);
     const [currentPickingDayIndex, setCurrentPickingDayIndex] = useState<number | null>(null);
-    const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<string[]>([]);
-
-    // Available muscle groups for filtering
-    const MUSCLE_GROUPS = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Legs', 'Glutes', 'Core', 'Cardio'];
 
     useEffect(() => {
         loadData();
@@ -167,35 +164,8 @@ export default function EditPlan() {
 
     const openExercisePicker = (dayIndex: number) => {
         setCurrentPickingDayIndex(dayIndex);
-        setSelectedMuscleGroups([]); // Reset filters when opening picker
         setShowExercisePicker(true);
     };
-
-    const toggleMuscleGroup = (muscleGroup: string) => {
-        setSelectedMuscleGroups(prev =>
-            prev.includes(muscleGroup)
-                ? prev.filter(mg => mg !== muscleGroup)
-                : [...prev, muscleGroup]
-        );
-    };
-
-    // Filter exercises based on selected muscle groups (exact word matching)
-    const filteredExercises = selectedMuscleGroups.length > 0
-        ? allExercises.filter(exercise =>
-            exercise.muscle_groups?.some(mg => {
-                const mgLower = mg.toLowerCase();
-                return selectedMuscleGroups.some(selected => {
-                    const selectedLower = selected.toLowerCase();
-                    // Match if the muscle group contains the selected word as a whole word
-                    return mgLower === selectedLower ||
-                        mgLower.includes(selectedLower + ' ') ||
-                        mgLower.includes(' ' + selectedLower) ||
-                        mgLower.startsWith(selectedLower + '_') ||
-                        mgLower.endsWith('_' + selectedLower);
-                });
-            })
-        )
-        : allExercises;
 
     const addExerciseToDay = (exercise: Exercise) => {
         if (currentPickingDayIndex === null) return;
@@ -405,65 +375,12 @@ export default function EditPlan() {
             </ScrollView>
 
             {/* Exercise Picker Modal */}
-            <Modal visible={showExercisePicker} animationType="slide" transparent={true}>
-                <View className="flex-1 bg-black/50 justify-end">
-                    <View className="bg-gray-900 rounded-t-3xl p-6 max-h-[70%]">
-                        <View className="flex-row justify-between items-center mb-4">
-                            <Text className="text-white font-bold text-lg">Select Exercise</Text>
-                            <TouchableOpacity onPress={() => setShowExercisePicker(false)}>
-                                <Ionicons name="close" size={28} color="#6b7280" />
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Muscle Group Filter */}
-                        <View className="mb-4">
-                            <View className="flex-row justify-between items-center mb-2">
-                                <Text className="text-gray-400 font-bold text-xs uppercase tracking-wider">Filter by Muscle Group</Text>
-                                {selectedMuscleGroups.length > 0 && (
-                                    <TouchableOpacity onPress={() => setSelectedMuscleGroups([])}>
-                                        <Text className="text-blue-400 text-xs font-bold">Clear All</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-2">
-                                <View className="flex-row gap-2 px-2">
-                                    {MUSCLE_GROUPS.map(group => (
-                                        <TouchableOpacity
-                                            key={group}
-                                            onPress={() => toggleMuscleGroup(group)}
-                                            className={`px-4 py-2 rounded-full border ${selectedMuscleGroups.includes(group)
-                                                ? 'bg-blue-600 border-blue-500'
-                                                : 'bg-gray-800/50 border-gray-700'
-                                                }`}
-                                        >
-                                            <Text className={`font-bold text-sm ${selectedMuscleGroups.includes(group) ? 'text-white' : 'text-gray-400'
-                                                }`}>
-                                                {group}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            </ScrollView>
-                        </View>
-
-                        <ScrollView>
-                            {filteredExercises.map(exercise => (
-                                <TouchableOpacity
-                                    key={exercise.id}
-                                    className="bg-gray-800 p-4 rounded-lg mb-2"
-                                    onPress={() => addExerciseToDay(exercise)}
-                                >
-                                    <Text className="text-white font-medium">{exercise.name}</Text>
-                                    <Text className="text-gray-400 text-sm">{exercise.category}</Text>
-                                    {exercise.muscle_groups && exercise.muscle_groups.length > 0 && (
-                                        <Text className="text-gray-500 text-xs mt-0.5">{exercise.muscle_groups.join(', ')}</Text>
-                                    )}
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
+            <ExercisePickerModal
+                visible={showExercisePicker}
+                onClose={() => setShowExercisePicker(false)}
+                onSelect={addExerciseToDay}
+                allExercises={allExercises}
+            />
         </SafeAreaView>
     );
 }
