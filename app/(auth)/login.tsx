@@ -1,7 +1,8 @@
 import { useAuth } from '@/hooks/useAuth'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { Link, useRouter } from 'expo-router'
 import { useState } from 'react'
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native'
 
 export default function Login() {
     const [email, setEmail] = useState('')
@@ -9,12 +10,13 @@ export default function Login() {
     const [loading, setLoading] = useState(false)
     const router = useRouter()
     const { signIn } = useAuth()
+    const { showDialog } = useConfirmDialog()
 
     const handleLogin = async () => {
         console.log("Login button pressed");
         if (!email || !password) {
             console.log("Validation failed: missing fields");
-            Alert.alert('Error', 'Please fill in all fields')
+            showDialog('Error', 'Please fill in all fields')
             return
         }
 
@@ -25,13 +27,13 @@ export default function Login() {
             console.log("Login response:", error ? "Error" : "Success", error);
 
             if (error) {
-                Alert.alert('Login Failed', error.message)
+                showDialog('Login Failed', error.message)
             } else {
                 // Navigation is handled by the auth state listener in _layout.tsx
             }
         } catch (e) {
             console.error("Login crashed:", e);
-            Alert.alert("Error", "An unexpected error occurred during login.");
+            showDialog("Error", "An unexpected error occurred during login.");
         } finally {
             setLoading(false)
         }

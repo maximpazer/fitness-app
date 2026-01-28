@@ -1,7 +1,8 @@
 import { useAuth } from '@/hooks/useAuth'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native'
 
 export default function Signup() {
     const [email, setEmail] = useState('')
@@ -12,6 +13,7 @@ export default function Signup() {
 
     const { signUp } = useAuth()
     const router = useRouter()
+    const { showDialog } = useConfirmDialog()
 
     const [debugStatus, setDebugStatus] = useState('')
 
@@ -19,19 +21,19 @@ export default function Signup() {
         setDebugStatus('Starting validation...')
         if (!email || !password || !confirmPassword || !displayName) {
             setDebugStatus('Validation failed: Missing fields')
-            Alert.alert('Error', 'Please fill in all fields')
+            showDialog('Error', 'Please fill in all fields')
             return
         }
 
         if (password !== confirmPassword) {
             setDebugStatus('Validation failed: Passwords mismatch')
-            Alert.alert('Error', 'Passwords do not match')
+            showDialog('Error', 'Passwords do not match')
             return
         }
 
         if (password.length < 6) {
             setDebugStatus('Validation failed: Password too short')
-            Alert.alert('Error', 'Password should be at least 6 characters')
+            showDialog('Error', 'Password should be at least 6 characters')
             return
         }
 
@@ -46,7 +48,7 @@ export default function Signup() {
             if (error) {
                 console.error("Signup error:", error);
                 setDebugStatus(`Error: ${error.message}`)
-                Alert.alert('Signup Failed', error.message)
+                showDialog('Signup Failed', error.message)
                 return;
             }
 
@@ -60,7 +62,7 @@ export default function Signup() {
             } else if (data?.user) {
                 setDebugStatus('User created. Verification required.')
                 console.log("User created but no session. Email verification likely required.");
-                Alert.alert(
+                showDialog(
                     'Verification Required',
                     'Account created successfully! \n\nPlease check your email to verify your account before logging in.',
                     [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
@@ -70,7 +72,7 @@ export default function Signup() {
             console.error("Signup exception:", e);
             setLoading(false);
             setDebugStatus(`Exception: ${e.message || 'Unknown error'}`)
-            Alert.alert('Error', 'An unexpected error occurred.')
+            showDialog('Error', 'An unexpected error occurred.')
         }
     }
 

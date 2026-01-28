@@ -1,10 +1,11 @@
 import { useAuthContext } from '@/context/AuthContext';
 import { useAuth } from '@/hooks/useAuth';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { profileService } from '@/services/profile.service';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Animated, { FadeInRight, FadeOutLeft } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -21,6 +22,7 @@ export default function Onboarding() {
     const { user } = useAuth();
     const { refreshProfile } = useAuthContext();
     const router = useRouter();
+    const { showDialog } = useConfirmDialog();
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
 
@@ -57,7 +59,7 @@ export default function Onboarding() {
             router.replace('/(tabs)');
 
         } catch (e: any) {
-            Alert.alert('Error', e.message);
+            showDialog('Error', e.message);
         } finally {
             setLoading(false);
         }

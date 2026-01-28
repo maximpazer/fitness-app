@@ -1,4 +1,5 @@
 import { useAuthContext } from '@/context/AuthContext';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { ChatMessage, generateGeminiContent } from '@/lib/gemini';
 import { dashboardService } from '@/services/dashboard.service';
 import { exerciseService } from '@/services/exercise.service';
@@ -9,8 +10,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Message = {
     role: 'user' | 'model';
@@ -57,6 +58,8 @@ const MarkdownText = ({ text, style, isUser }: { text: string, style: any, isUse
 
 export default function Chat() {
     const { user, profile } = useAuthContext();
+    const { showDialog } = useConfirmDialog();
+    const insets = useSafeAreaInsets();
     const [messages, setMessages] = useState<Message[]>([
         { role: 'model', content: 'Hi! I\'m your AI fitness coach. I have access to your profile and workout history. How can I help you today?' }
     ]);
@@ -260,12 +263,7 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                 }
             }
 
-            // Check if AI mentioned plan changes but didn't provide valid JSON
-            const suggestionKeywords = /add|modify|change|update|suggest|recommend|include|incorporate|new exercise|core routine|workout plan/i;
-            const exerciseIdPattern = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi;
-            const hasSuggestions = !proposal && suggestionKeywords.test(reply);
-
-            setMessages([...newMessages, { role: 'model', content: cleanReply || "I've prepared a plan update for you:", proposal, hasSuggestions }]);
+            setMessages([...newMessages, { role: 'model', content: cleanReply || "I've prepared a plan update for you:", proposal }]);
         } catch (e) {
             console.error("Chat error:", e);
             setMessages([...newMessages, { role: 'model', content: "Sorry, I'm having trouble connecting to my brain right now. Please try again." }]);
@@ -279,13 +277,13 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
 
         // Validate proposal has required structure
         if (!proposal || !proposal.name || !proposal.days || !Array.isArray(proposal.days)) {
-            Alert.alert("Invalid Proposal", "The plan proposal is missing required fields. Please ask the AI to generate a complete plan.");
+            showDialog("Invalid Proposal", "The plan proposal is missing required fields. Please ask the AI to generate a complete plan.");
             return;
         }
 
         const isUpdate = !!metadata?.activePlan;
 
-        Alert.alert(
+        showDialog(
             isUpdate ? "Apply New Version" : "Create New Plan",
             isUpdate
                 ? "The AI suggested some improvements. Would you like to create an updated version of your plan and activate it?"
@@ -301,11 +299,11 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                             // plannerService.createPlan automatically deactivates the old plan.
                             await plannerService.createPlan(user.id, proposal);
 
-                            Alert.alert("Success", isUpdate ? "New version created and activated!" : "New plan created and activated!");
+                            showDialog("Success", isUpdate ? "New version created and activated!" : "New plan created and activated!");
                             loadContext(); // Refresh context
                         } catch (e: any) {
                             console.error("Error applying proposal:", e);
-                            Alert.alert("Error", `Failed to apply changes: ${e.message || 'Unknown error'}`);
+                            showDialog("Error", `Failed to apply changes: ${e.message || 'Unknown error'}`);
                         } finally {
                             setLoading(false);
                         }
@@ -315,148 +313,43 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
         );
     };
 
-    const requestFullPlanProposal = async () => {
-        if (loading) return;
-
-        const followUp = "Please generate the complete updated plan as a valid JSON proposal. Include ALL existing exercises from my current plan PLUS the new exercises you suggested. Use the exact plan_proposal format with the ```plan_proposal code block.";
-
-        const newMessages: Message[] = [...messages, { role: 'user', content: followUp }];
-        setMessages(newMessages);
-        setLoading(true);
-        setInput('');
-
-        try {
-            const systemPrompt = `
-You are an expert AI Fitness Coach.
-Current Profile: ${JSON.stringify(metadata?.profile || {})}
-Active Training Plan: ${JSON.stringify(metadata?.activePlan || "No active plan")}
-Detailed Recent Workout History: ${JSON.stringify(metadata?.detailedHistory || [])}
-Available Exercises: ${metadata?.exercises?.map((e: any) => e.name).join(', ') || 'None'}
-
-The user wants a complete plan proposal based on your previous suggestions.
-Generate a COMPLETE JSON proposal. Include ALL days and ALL exercises. 
-Use the exact \`\`\`plan_proposal\`\`\` code block marker.
-For exercises, use "exercise_name" with the exact name from the list.
-Ensure the structure matches the CreatePlanDTO.
-
-CRITICAL: Output the ENTIRE plan JSON. Do not omit any days or exercises.
-
-CreatePlanDTO Structure:
-{
-  "name": "Plan Name",
-  "description": "Plan description",
-  "duration_weeks": 8,
-  "days": [
-    {
-      "day_number": 1,
-      "day_name": "Day Name",
-      "day_type": "training",
-      "notes": "",
-      "exercises": [
-        {
-          "exercise_name": "Exercise Name",
-          "order_in_workout": 1,
-          "target_sets": 3,
-          "target_reps_min": 8,
-          "target_reps_max": 12,
-          "target_rpe": 8,
-          "rest_seconds": 90,
-          "notes": ""
-        }
-      ]
-    }
-  ]
-}
-`;
-
-            const geminiHistory: ChatMessage[] = newMessages.map(m => ({
-                role: m.role,
-                parts: [{ text: m.content }]
-            }));
-
-            const reply = await generateGeminiContent(geminiHistory, systemPrompt);
-
-            let cleanReply = reply;
-            let proposal = null;
-
-            const proposalMatch = reply.match(/```plan_proposal\s*([\s\S]*?)\s*```/i);
-            if (proposalMatch) {
-                try {
-                    const jsonStr = cleanJson(proposalMatch[1]);
-                    proposal = mapProposalExercises(JSON.parse(jsonStr));
-                    cleanReply = reply.replace(proposalMatch[0], '').trim() || "Here's your updated plan:";
-                } catch (e) {
-                    console.error("Failed to parse plan_proposal JSON", e);
-                }
-            }
-
-            // Fallback to generic json block
-            if (!proposal) {
-                const genericJsonMatch = reply.match(/```json\s*([\s\S]*?)\s*```/i);
-                if (genericJsonMatch) {
-                    try {
-                        const potentialJson = JSON.parse(cleanJson(genericJsonMatch[1]));
-                        if (potentialJson.days && Array.isArray(potentialJson.days)) {
-                            proposal = mapProposalExercises(potentialJson);
-                            cleanReply = reply.replace(genericJsonMatch[0], '').trim() || "Here's your updated plan:";
-                        }
-                    } catch (e) { }
-                }
-            }
-
-            // Try to find raw JSON object
-            if (!proposal) {
-                const rawJsonMatch = reply.match(/\{[\s\S]*?"days"\s*:\s*\[[\s\S]*?\]\s*\}/);
-                if (rawJsonMatch) {
-                    try {
-                        proposal = mapProposalExercises(JSON.parse(cleanJson(rawJsonMatch[0])));
-                        cleanReply = "Here's your updated plan:";
-                    } catch (e) { }
-                }
-            }
-
-            if (proposal) {
-                setMessages([...newMessages, { role: 'model', content: cleanReply, proposal }]);
-            } else {
-                setMessages([...newMessages, { role: 'model', content: "I apologize, but I couldn't generate a valid plan structure. Please try describing what changes you'd like, and I'll create a complete plan proposal." }]);
-            }
-        } catch (e) {
-            console.error("Error requesting plan:", e);
-            setMessages([...newMessages, { role: 'model', content: "Sorry, I encountered an error generating the plan. Please try again." }]);
-        } finally {
-            setLoading(false);
-        }
-    };
-
     return (
-        <SafeAreaView className="flex-1 bg-gray-950" edges={['top']}>
-            <View className="flex-1">
-                {/* Header */}
-                <View className="px-6 py-4 border-b border-gray-900 bg-gray-950">
-                    <View className="flex-row items-center justify-between">
-                        <View>
-                            <Text className="text-2xl font-bold text-white">AI Coach</Text>
-                            <View className="flex-row items-center mt-1">
-                                <View className="w-2 h-2 rounded-full bg-green-500 mr-2" />
-                                <Text className="text-gray-400 text-xs font-medium uppercase tracking-widest">Active & Context Aware</Text>
+        <SafeAreaView className="flex-1 bg-gray-950" edges={['top', 'bottom']}>
+            <KeyboardAvoidingView 
+                className="flex-1"
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={0}
+            >
+                <View className="flex-1">
+                    {/* Header */}
+                    <View className="px-6 py-4 border-b border-gray-900 bg-gray-950">
+                        <View className="flex-row items-center justify-between">
+                            <View>
+                                <Text className="text-2xl font-bold text-white">AI Coach</Text>
+                                <View className="flex-row items-center mt-1">
+                                    <View className="w-2 h-2 rounded-full bg-green-500 mr-2" />
+                                    <Text className="text-gray-400 text-xs font-medium uppercase tracking-widest">Active & Context Aware</Text>
+                                </View>
                             </View>
+                            <TouchableOpacity
+                                onPress={loadContext}
+                                className="w-10 h-10 bg-gray-900 rounded-full items-center justify-center border border-gray-800"
+                            >
+                                <Ionicons name="refresh" size={20} color="#3b82f6" />
+                            </TouchableOpacity>
                         </View>
-                        <TouchableOpacity
-                            onPress={loadContext}
-                            className="w-10 h-10 bg-gray-900 rounded-full items-center justify-center border border-gray-800"
-                        >
-                            <Ionicons name="refresh" size={20} color="#3b82f6" />
-                        </TouchableOpacity>
                     </View>
-                </View>
 
-                <FlatList
-                    ref={flatListRef}
-                    data={messages}
-                    className="flex-1 px-4"
-                    contentContainerStyle={{ paddingVertical: 20 }}
-                    keyExtractor={(_, i) => i.toString()}
-                    onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+                    <FlatList
+                        ref={flatListRef}
+                        data={messages}
+                        className="flex-1 px-4"
+                        contentContainerStyle={{ 
+                            paddingVertical: 20,
+                            paddingBottom: 120
+                        }}
+                        keyExtractor={(_, i) => i.toString()}
+                        onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
                     renderItem={({ item }) => (
                         <View className={`my-3 ${item.role === 'user' ? 'items-end' : 'items-start'}`}>
                             <View className={`p-4 rounded-3xl max-w-[85%] ${item.role === 'user'
@@ -524,82 +417,50 @@ CreatePlanDTO Structure:
                                 </View>
                             )}
 
-                            {/* Show button when AI gave suggestions but no valid JSON proposal */}
-                            {item.hasSuggestions && !item.proposal && item.role === 'model' && (
-                                <View className="mt-3 bg-gray-900 border border-amber-500/30 p-4 rounded-2xl w-[90%]">
-                                    <View className="flex-row items-center mb-2">
-                                        <Ionicons name="information-circle" size={18} color="#f59e0b" />
-                                        <Text className="text-amber-400 font-medium ml-2 text-sm">Suggestions Detected</Text>
-                                    </View>
-                                    <Text className="text-gray-400 text-sm mb-3">
-                                        I noticed plan suggestions in this response. Tap below to generate an applicable plan.
-                                    </Text>
-                                    <TouchableOpacity
-                                        activeOpacity={0.7}
-                                        onPress={requestFullPlanProposal}
-                                        disabled={loading}
-                                        className={`bg-amber-600 py-3 rounded-xl items-center flex-row justify-center ${loading ? 'opacity-50' : ''}`}
-                                    >
-                                        {loading ? (
-                                            <ActivityIndicator size="small" color="white" />
-                                        ) : (
-                                            <>
-                                                <Text className="text-white font-bold text-sm mr-2">Generate Plan Proposal</Text>
-                                                <Ionicons name="sparkles" size={16} color="white" />
-                                            </>
-                                        )}
-                                    </TouchableOpacity>
-                                </View>
-                            )}
+
                         </View>
                     )}
                 />
 
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                    keyboardVerticalOffset={Platform.OS === 'ios' ? 110 : 0}
+                {/* Input Field - Fixed at bottom */}
+                <View 
+                    className="px-4 pt-3 bg-gray-950 border-t border-gray-800"
+                    style={{ paddingBottom: Math.max(insets.bottom + 6, 24) }}
                 >
-                    <View className="p-4 bg-gray-950 border-t border-gray-900 pb-24">
-                        <View className="flex-row items-center bg-gray-900 rounded-full px-4 border border-gray-800">
-                            <TextInput
-                                className="flex-1 py-3 text-white text-base"
-                                placeholder="Ask about your progress, plan..."
-                                placeholderTextColor="#4b5563"
-                                value={input}
-                                onChangeText={setInput}
-                                multiline
-                                maxLength={500}
-                                style={{ maxHeight: 80 }}
-                                returnKeyType="send"
-                                onSubmitEditing={(e) => {
-                                    if (Platform.OS !== 'web') {
-                                        // On mobile, multiline enter might just add newline if not handled
-                                        // But if we want enter to send, we check if it's not a shift-enter (hard in RN)
-                                        // Usually for chat we want a dedicated send button, but enter should work too
-                                        sendMessage();
-                                    }
-                                }}
-                                blurOnSubmit={true}
-                                enablesReturnKeyAutomatically={true}
-                            />
-                            <TouchableOpacity
-                                className={`w-10 h-10 rounded-full items-center justify-center ${loading || !input.trim() ? 'opacity-50' : ''}`}
-                                onPress={sendMessage}
-                                disabled={loading || !input.trim()}
-                            >
-                                {loading ? (
-                                    <ActivityIndicator size="small" color="#3b82f6" />
-                                ) : (
-                                    <Ionicons name="arrow-up-circle" size={32} color="#3b82f6" />
-                                )}
-                            </TouchableOpacity>
-                        </View>
-                        <Text className="text-[10px] text-center text-gray-600 mt-2 uppercase tracking-tighter">
-                            Powered by Gemini 2.0 Flash
-                        </Text>
+                    <View className="flex-row items-center bg-gray-900 rounded-2xl px-4 py-2 border border-gray-800">
+                        <TextInput
+                            className="flex-1 py-2 text-white text-base"
+                            placeholder="Ask about your progress, plan..."
+                            placeholderTextColor="#6b7280"
+                            value={input}
+                            onChangeText={setInput}
+                            multiline
+                            maxLength={500}
+                            style={{ maxHeight: 100 }}
+                            returnKeyType="send"
+                            onSubmitEditing={(e) => {
+                                if (Platform.OS !== 'web') {
+                                    sendMessage();
+                                }
+                            }}
+                            blurOnSubmit={true}
+                            enablesReturnKeyAutomatically={true}
+                        />
+                        <TouchableOpacity
+                            className={`ml-2 w-10 h-10 rounded-full items-center justify-center ${loading || !input.trim() ? 'opacity-50' : ''}`}
+                            onPress={sendMessage}
+                            disabled={loading || !input.trim()}
+                        >
+                            {loading ? (
+                                <ActivityIndicator size="small" color="#3b82f6" />
+                            ) : (
+                                <Ionicons name="arrow-up-circle" size={36} color="#3b82f6" />
+                            )}
+                        </TouchableOpacity>
                     </View>
-                </KeyboardAvoidingView>
+                </View>
             </View>
+            </KeyboardAvoidingView>
         </SafeAreaView >
     );
 }

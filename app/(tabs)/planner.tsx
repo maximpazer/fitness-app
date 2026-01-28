@@ -1,15 +1,17 @@
 import { useAuthContext } from '@/context/AuthContext';
 import { useWorkout } from '@/context/WorkoutContext';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { FullPlan, plannerService } from '@/services/planner.service';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function Planner() {
     const { user } = useAuthContext();
     const router = useRouter();
+    const { showDialog } = useConfirmDialog();
     const [loading, setLoading] = useState(true);
     const [generating, setGenerating] = useState(false);
     const [activePlan, setActivePlan] = useState<FullPlan | null>(null);
@@ -23,7 +25,7 @@ export default function Planner() {
             setActivePlan(plan);
         } catch (error) {
             console.error(error);
-            Alert.alert('Error', 'Failed to load workout plan');
+            showDialog('Error', 'Failed to load workout plan');
         } finally {
             setLoading(false);
         }
@@ -63,7 +65,7 @@ export default function Planner() {
         try {
             await initWorkout(user.id, targetId);
         } catch (e) {
-            Alert.alert("Error", "Could not start workout");
+            showDialog("Error", "Could not start workout");
         }
     };
 

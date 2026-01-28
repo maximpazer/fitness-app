@@ -1,5 +1,9 @@
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { CustomNumericKeypad } from '@/components/CustomNumericKeypad';
+import { ExerciseVideoModal } from '@/components/ExerciseVideoModal';
 import { useAuthContext } from '@/context/AuthContext';
 import { useWorkout } from '@/context/WorkoutContext';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { plannerService } from '@/services/planner.service';
 import { workoutService } from '@/services/workout.service';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,13 +11,14 @@ import { format } from 'date-fns';
 import { Audio } from 'expo-av';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
-import Animated, { Extrapolate, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { Extrapolate, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const WorkoutLoggerOverlay = () => {
     const { user } = useAuthContext();
+    const { showDialog } = useConfirmDialog();
     const {
         activeWorkout,
         startWorkout,
@@ -40,14 +45,28 @@ export const WorkoutLoggerOverlay = () => {
     // Ad-hoc Exercise State
     const [addExVisible, setAddExVisible] = useState(false);
     const [availableExercises, setAvailableExercises] = useState<any[]>([]);
+    const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<string[]>([]);
+
+    // Available muscle groups for filtering
+    const MUSCLE_GROUPS = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Legs', 'Glutes', 'Core', 'Cardio'];
 
     // UI/Loading State
     const [saving, setSaving] = useState(false);
     const [exHistory, setExHistory] = useState<Record<string, { summary: string; date: string; sets: any[] }>>({});
 
+    // Dialog State
+    const [finishDialogVisible, setFinishDialogVisible] = useState(false);
+    const [successDialogVisible, setSuccessDialogVisible] = useState(false);
+    const [errorDialogVisible, setErrorDialogVisible] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
+
+    // Exercise Video Modal State
+    const [selectedExercise, setSelectedExercise] = useState<any>(null);
+
     // Focus / Navigation State
     const [activeExIdx, setActiveExIdx] = useState(0);
     const [activeSetIdx, setActiveSetIdx] = useState(0);
+    const [activeField, setActiveField] = useState<'weight' | 'reps' | null>(null);
     const inputRefs = useRef<Record<string, TextInput | null>>({});
     const scrollViewRef = useRef<ScrollView | null>(null);
     const [isKeyboardVisible, setKeyboardVisible] = useState(false);
@@ -59,9 +78,9 @@ export const WorkoutLoggerOverlay = () => {
 
     useEffect(() => {
         if (isMaximized) {
-            translateY.value = withSpring(0, { damping: 20, stiffness: 90 });
+            translateY.value = withTiming(0, { duration: 300 });
         } else {
-            translateY.value = withSpring(SCREEN_HEIGHT, { damping: 20, stiffness: 90 });
+            translateY.value = withTiming(SCREEN_HEIGHT, { duration: 300 });
         }
     }, [isMaximized]);
 
@@ -128,6 +147,33 @@ export const WorkoutLoggerOverlay = () => {
         loadHistory();
     }, [user, activeWorkout?.exercises.length]);
 
+    const toggleMuscleGroup = (muscleGroup: string) => {
+        setSelectedMuscleGroups(prev =>
+            prev.includes(muscleGroup)
+                ? prev.filter(mg => mg !== muscleGroup)
+                : [...prev, muscleGroup]
+        );
+    };
+
+    // Filter exercises based on selected muscle groups (exact word matching)
+    const filteredAvailableExercises = selectedMuscleGroups.length > 0
+        ? availableExercises.filter(exercise =>
+            exercise.muscle_groups?.some((mg: string) => {
+                const mgLower = mg.toLowerCase();
+                return selectedMuscleGroups.some(selected => {
+                    const selectedLower = selected.toLowerCase();
+                    // Match if the muscle group contains the selected word as a whole word
+                    // or if it's an exact match
+                    return mgLower === selectedLower ||
+                        mgLower.includes(selectedLower + ' ') ||
+                        mgLower.includes(' ' + selectedLower) ||
+                        mgLower.startsWith(selectedLower + '_') ||
+                        mgLower.endsWith('_' + selectedLower);
+                });
+            })
+        )
+        : availableExercises;
+
     // Derived State
     const totalVolume = useMemo(() => {
         if (!activeWorkout) return 0;
@@ -154,6 +200,8 @@ export const WorkoutLoggerOverlay = () => {
                 setRestTimeRemaining((prev) => {
                     if (prev <= 1) {
                         setRestTimerVisible(false);
+                        // Auto-focus next set when rest timer completes
+                        setTimeout(() => focusNextSetAfterRest(), 200);
                         return 0;
                     }
                     return prev - 1;
@@ -186,11 +234,55 @@ export const WorkoutLoggerOverlay = () => {
         }
     };
 
+    const focusNextSetAfterRest = () => {
+        if (!activeWorkout) return;
+
+        // Find next uncompleted set
+        const currentEx = activeWorkout.exercises[activeExIdx];
+        let nextExIdx = activeExIdx;
+        let nextSetIdx = activeSetIdx;
+
+        // Try to find next set in current exercise
+        for (let i = activeSetIdx + 1; i < currentEx.sets.length; i++) {
+            if (!currentEx.sets[i].completed) {
+                nextSetIdx = i;
+                setTimeout(() => {
+                    setActiveExIdx(nextExIdx);
+                    setActiveSetIdx(nextSetIdx);
+                    setActiveField('weight');
+                    setKeyboardVisible(true);
+                    inputRefs.current[`${nextExIdx}-${nextSetIdx}-weight`]?.focus();
+                }, 100);
+                return;
+            }
+        }
+
+        // Try to find next exercise with uncompleted sets
+        for (let i = activeExIdx + 1; i < activeWorkout.exercises.length; i++) {
+            const exercise = activeWorkout.exercises[i];
+            for (let j = 0; j < exercise.sets.length; j++) {
+                if (!exercise.sets[j].completed) {
+                    nextExIdx = i;
+                    nextSetIdx = j;
+                    setTimeout(() => {
+                        setActiveExIdx(nextExIdx);
+                        setActiveSetIdx(nextSetIdx);
+                        setActiveField('weight');
+                        setKeyboardVisible(true);
+                        inputRefs.current[`${nextExIdx}-${nextSetIdx}-weight`]?.focus();
+                    }, 100);
+                    return;
+                }
+            }
+        }
+    };
+
     const handleKeySubmit = (exIndex: number, setIndex: number, field: 'weight' | 'reps') => {
         if (!activeWorkout) return;
 
         if (field === 'weight') {
             // Move from weight to reps
+            setActiveField('reps');
             inputRefs.current[`${exIndex}-${setIndex}-reps`]?.focus();
         } else {
             // Target reps finished, mark complete and go to next set
@@ -200,64 +292,107 @@ export const WorkoutLoggerOverlay = () => {
             if (setIndex < currentEx.sets.length - 1) {
                 const nextSetIdx = setIndex + 1;
                 setActiveSetIdx(nextSetIdx);
+                setActiveField('weight');
                 inputRefs.current[`${exIndex}-${nextSetIdx}-weight`]?.focus();
             } else if (exIndex < activeWorkout.exercises.length - 1) {
                 const nextExIdx = exIndex + 1;
                 setActiveExIdx(nextExIdx);
                 setActiveSetIdx(0);
+                setActiveField('weight');
                 inputRefs.current[`${nextExIdx}-0-weight`]?.focus();
             } else {
-                Keyboard.dismiss();
+                setActiveField(null);
+                setKeyboardVisible(false);
             }
+        }
+    };
+
+    // Custom keypad handlers
+    const handleNumericInput = (num: string) => {
+        if (!activeWorkout || activeField === null) return;
+        const currentValue = activeField === 'weight'
+            ? activeWorkout.exercises[activeExIdx].sets[activeSetIdx].weight
+            : activeWorkout.exercises[activeExIdx].sets[activeSetIdx].reps;
+
+        const newValue = currentValue + num;
+        handleSetChange(activeExIdx, activeSetIdx, activeField, newValue);
+    };
+
+    const handleBackspace = () => {
+        if (!activeWorkout || activeField === null) return;
+        const currentValue = activeField === 'weight'
+            ? activeWorkout.exercises[activeExIdx].sets[activeSetIdx].weight
+            : activeWorkout.exercises[activeExIdx].sets[activeSetIdx].reps;
+
+        const newValue = currentValue.slice(0, -1);
+        handleSetChange(activeExIdx, activeSetIdx, activeField, newValue);
+    };
+
+    const handlePlusMinus = () => {
+        if (!activeWorkout || activeField === null) return;
+        const currentValue = activeField === 'weight'
+            ? activeWorkout.exercises[activeExIdx].sets[activeSetIdx].weight
+            : activeWorkout.exercises[activeExIdx].sets[activeSetIdx].reps;
+
+        if (currentValue.startsWith('-')) {
+            handleSetChange(activeExIdx, activeSetIdx, activeField, currentValue.substring(1));
+        } else if (currentValue) {
+            handleSetChange(activeExIdx, activeSetIdx, activeField, '-' + currentValue);
+        }
+    };
+
+    const handleIncrement = () => {
+        if (!activeWorkout || activeField === null) return;
+        const currentValue = activeField === 'weight'
+            ? activeWorkout.exercises[activeExIdx].sets[activeSetIdx].weight
+            : activeWorkout.exercises[activeExIdx].sets[activeSetIdx].reps;
+
+        const num = parseFloat(currentValue) || 0;
+        const increment = activeField === 'weight' ? 2.5 : 1;
+        handleSetChange(activeExIdx, activeSetIdx, activeField, String(num + increment));
+    };
+
+    const handleDecrement = () => {
+        if (!activeWorkout || activeField === null) return;
+        const currentValue = activeField === 'weight'
+            ? activeWorkout.exercises[activeExIdx].sets[activeSetIdx].weight
+            : activeWorkout.exercises[activeExIdx].sets[activeSetIdx].reps;
+
+        const num = parseFloat(currentValue) || 0;
+        const decrement = activeField === 'weight' ? 2.5 : 1;
+        handleSetChange(activeExIdx, activeSetIdx, activeField, String(Math.max(0, num - decrement)));
+    };
+
+    const handleCustomKeyNext = () => {
+        handleKeySubmit(activeExIdx, activeSetIdx, activeField || 'weight');
+    };
+
+    const onFinalFinish = async (shouldOverwrite: boolean) => {
+        try {
+            setSaving(true);
+            setFinishDialogVisible(false);
+            if (shouldOverwrite && activeWorkout?.planDayId) {
+                await plannerService.updatePlanDayExercises(activeWorkout.planDayId, activeWorkout.exercises);
+            }
+            if (user) {
+                await finishWorkout(user.id);
+            }
+            setIsMaximized(false);
+            setTimeout(() => {
+                setSuccessDialogVisible(true);
+            }, 500);
+        } catch (error) {
+            console.error("Error saving workout:", error);
+            setErrorMessage("Failed to save workout");
+            setErrorDialogVisible(true);
+        } finally {
+            setSaving(false);
         }
     };
 
     const handleFinish = async () => {
         if (!user || !activeWorkout) return;
-
-        const onFinalFinish = async (shouldOverwrite: boolean) => {
-            try {
-                setSaving(true);
-                if (shouldOverwrite && activeWorkout.planDayId) {
-                    await plannerService.updatePlanDayExercises(activeWorkout.planDayId, activeWorkout.exercises);
-                }
-                await finishWorkout(user.id);
-                setIsMaximized(false);
-                setTimeout(() => {
-                    Alert.alert("Great Job!", "Workout saved successfully.");
-                }, 500);
-            } catch (error) {
-                console.error("Error saving workout:", error);
-                Alert.alert("Error", "Failed to save workout");
-            } finally {
-                setSaving(false);
-            }
-        };
-
-        if (activeWorkout.hasAdHoc) {
-            Alert.alert(
-                "Update Plan Template?",
-                "You added exercises during this session. Do you want to add them permanently to your workout plan?",
-                [
-                    { text: "Update Template", onPress: () => onFinalFinish(true) },
-                    { text: "Only Save Results", onPress: () => onFinalFinish(false) },
-                    { text: "Cancel", style: "cancel" }
-                ]
-            );
-        } else {
-            Alert.alert(
-                "Finish Workout",
-                "Are you sure you want to finish this session?",
-                [
-                    { text: "Resume", style: "cancel" },
-                    {
-                        text: "Finish Workout",
-                        style: "destructive",
-                        onPress: () => onFinalFinish(false)
-                    }
-                ]
-            );
-        }
+        setFinishDialogVisible(true);
     };
 
     const handleMinimize = () => {
@@ -324,7 +459,7 @@ export const WorkoutLoggerOverlay = () => {
                             <View className="flex-row items-center flex-1">
                                 <TouchableOpacity
                                     onPress={() => {
-                                        Alert.alert(
+                                        showDialog(
                                             "Exit Workout",
                                             "Are you sure you want to exit? Your progress for this session will be lost.",
                                             [
@@ -368,183 +503,202 @@ export const WorkoutLoggerOverlay = () => {
                             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                             className="flex-1"
                         >
-                            <ScrollView
-                                ref={scrollViewRef}
-                                className="flex-1 px-4 py-4"
-                                keyboardShouldPersistTaps="handled"
-                                onScroll={handleScroll}
-                                scrollEventThrottle={16}
+                            <Pressable
+                                className="flex-1"
+                                onPress={() => {
+                                    if (isKeyboardVisible) {
+                                        setKeyboardVisible(false);
+                                        setActiveField(null);
+                                    }
+                                }}
                             >
-                                {activeWorkout.exercises.map((ex, exIndex) => {
-                                    const history = exHistory[ex.exerciseId];
-                                    const exTotalVolume = ex.sets.reduce((acc, s) => acc + (parseFloat(s.weight) * parseFloat(s.reps) || 0), 0);
-
-                                    return (
-                                        <View key={`${ex.exerciseId}-${exIndex}`} className="mb-6 bg-gray-900 rounded-3xl overflow-hidden border border-gray-800">
-                                            <View className="p-4 bg-gray-900 text-left">
-                                                <View className="flex-row justify-between items-start mb-2">
-                                                    <Text className="text-blue-400 font-bold text-xl flex-1">{ex.name}</Text>
-                                                </View>
-
-                                                {history ? (
-                                                    <Text className="text-gray-500 text-xs text-left">
-                                                        Previous: {history.summary} ({history.date})
-                                                    </Text>
-                                                ) : (
-                                                    <Text className="text-gray-600 text-xs italic text-left">No prior history found</Text>
-                                                )}
-                                            </View>
-
-                                            <View className="flex-row bg-gray-800/50 py-2 px-4 border-y border-gray-800">
-                                                <Text className="w-10 text-gray-400 text-[10px] font-bold uppercase tracking-tight">Set</Text>
-                                                <View className="flex-1 flex-row items-center">
-                                                    <Text className="flex-1 text-center text-gray-400 text-[10px] font-bold uppercase tracking-tight">KG</Text>
-                                                    <Text className="flex-1 text-center text-gray-400 text-[10px] font-bold uppercase tracking-tight">Reps</Text>
-                                                    <Text className="flex-1 text-center text-gray-400 text-[10px] font-bold uppercase tracking-tight">Volume</Text>
-                                                </View>
-                                                <Text className="w-10 text-center text-gray-400 text-[10px] font-bold uppercase tracking-tight">✓</Text>
-                                            </View>
-
-                                            {ex.sets.map((set, setIndex) => {
-                                                const isActive = activeExIdx === exIndex && activeSetIdx === setIndex;
-                                                const setVolume = (parseFloat(set.weight) * parseFloat(set.reps) || 0);
-                                                const prevSet = history?.sets[setIndex];
-
-                                                return (
-                                                    <Swipeable
-                                                        key={`${ex.exerciseId}-set-${setIndex}`}
-                                                        renderRightActions={() => (
-                                                            <TouchableOpacity onPress={() => removeSet(exIndex, setIndex)} className="bg-red-600 justify-center px-10">
-                                                                <Ionicons name="trash-outline" size={24} color="white" />
-                                                            </TouchableOpacity>
-                                                        )}
-                                                        onSwipeableRightOpen={() => removeSet(exIndex, setIndex)}
-                                                        rightThreshold={40}
-                                                    >
-                                                        <View className={`flex-row items-center py-3 px-4 bg-gray-900 ${set.completed ? 'bg-green-900/10' : ''} ${isActive ? 'border-l-4 border-blue-500 bg-blue-600/5' : ''}`}>
-                                                            <Text className={`w-10 font-bold ${set.completed ? 'text-green-500' : isActive ? 'text-blue-400' : 'text-gray-500'}`}>
-                                                                {set.setNumber}
-                                                            </Text>
-
-                                                            <View className="flex-1 flex-row items-center">
-                                                                <View className="flex-1 px-1">
-                                                                    <TextInput
-                                                                        ref={r => { if (r) inputRefs.current[`${exIndex}-${setIndex}-weight`] = r; }}
-                                                                        className={`bg-gray-800/50 text-white text-center py-2.5 rounded-xl font-bold text-lg ${isActive ? 'border border-blue-500/50 bg-gray-800' : 'border border-transparent'} ${set.completed ? 'opacity-40 text-gray-400' : ''}`}
-                                                                        keyboardType="numeric"
-                                                                        value={set.weight}
-                                                                        onChangeText={(v) => handleSetChange(exIndex, setIndex, 'weight', v)}
-                                                                        onFocus={() => {
-                                                                            setActiveExIdx(exIndex);
-                                                                            setActiveSetIdx(setIndex);
-                                                                        }}
-                                                                        maxLength={5}
-                                                                        selectTextOnFocus
-                                                                        placeholder="0"
-                                                                        placeholderTextColor="#374151"
-                                                                        returnKeyType="next"
-                                                                        onSubmitEditing={() => handleKeySubmit(exIndex, setIndex, 'weight')}
-                                                                    />
-                                                                </View>
-
-                                                                <View className="flex-1 px-1">
-                                                                    <TextInput
-                                                                        ref={r => { if (r) inputRefs.current[`${exIndex}-${setIndex}-reps`] = r; }}
-                                                                        className={`bg-gray-800/50 text-white text-center py-2.5 rounded-xl font-bold text-lg ${isActive ? 'border border-blue-500/50 bg-gray-800' : 'border border-transparent'} ${set.completed ? 'opacity-40 text-gray-400' : ''}`}
-                                                                        keyboardType="numeric"
-                                                                        value={set.reps}
-                                                                        onChangeText={(v) => handleSetChange(exIndex, setIndex, 'reps', v)}
-                                                                        onFocus={() => {
-                                                                            setActiveExIdx(exIndex);
-                                                                            setActiveSetIdx(setIndex);
-                                                                        }}
-                                                                        maxLength={3}
-                                                                        selectTextOnFocus
-                                                                        placeholder="0"
-                                                                        placeholderTextColor="#374151"
-                                                                        returnKeyType="done"
-                                                                        onSubmitEditing={() => handleKeySubmit(exIndex, setIndex, 'reps')}
-                                                                    />
-                                                                </View>
-
-                                                                <View className="flex-1 items-center justify-start pt-2.5">
-                                                                    <Text className={`text-xs font-semibold ${set.completed ? 'text-green-600' : 'text-gray-400'}`}>
-                                                                        {setVolume > 0 ? `${setVolume.toFixed(0)} kg` : '-'}
-                                                                    </Text>
-                                                                </View>
-                                                            </View>
-
-                                                            <TouchableOpacity
-                                                                onPress={() => toggleSetComplete(exIndex, setIndex)}
-                                                                className={`w-10 h-10 items-center justify-center rounded-xl ${set.completed ? 'bg-green-600' : 'bg-gray-800/50 border border-gray-700'}`}
-                                                            >
-                                                                {set.completed ? (
-                                                                    <Ionicons name="checkmark" size={20} color="white" />
-                                                                ) : (
-                                                                    <View className="w-5 h-5 border-2 border-gray-600 rounded-md" />
-                                                                )}
-                                                            </TouchableOpacity>
-                                                        </View>
-                                                    </Swipeable>
-                                                );
-                                            })}
-
-                                            <View className="p-4 flex-row justify-between items-center bg-gray-900/50">
-                                                <TouchableOpacity
-                                                    onPress={() => addSet(exIndex)}
-                                                    className="flex-row items-center"
-                                                >
-                                                    <Ionicons name="add-circle-outline" size={20} color="#3b82f6" />
-                                                    <Text className="text-blue-400 font-bold ml-1 text-sm">Add Set</Text>
-                                                </TouchableOpacity>
-                                                <Text className="text-gray-500 text-xs font-bold uppercase tracking-widest">
-                                                    Total: <Text className="text-gray-300">{exTotalVolume.toLocaleString()} kg</Text>
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    );
-                                })}
-
-                                <TouchableOpacity
-                                    onPress={() => setAddExVisible(true)}
-                                    className="bg-gray-900 border border-dashed border-gray-700 p-6 rounded-3xl items-center flex-row justify-center mb-10"
+                                <ScrollView
+                                    ref={scrollViewRef}
+                                    className="flex-1 px-4 py-4"
+                                    keyboardShouldPersistTaps="handled"
+                                    onScroll={handleScroll}
+                                    scrollEventThrottle={16}
                                 >
-                                    <Ionicons name="add-circle" size={24} color="#3b82f6" />
-                                    <Text className="text-blue-400 font-bold ml-2 text-lg">Add Ad-hoc Exercise</Text>
-                                </TouchableOpacity>
+                                    {activeWorkout.exercises.map((ex, exIndex) => {
+                                        const history = exHistory[ex.exerciseId];
+                                        const exTotalVolume = ex.sets.reduce((acc, s) => acc + (parseFloat(s.weight) * parseFloat(s.reps) || 0), 0);
 
-                                <View className="h-32" />
-                            </ScrollView>
+                                        return (
+                                            <View key={`${ex.exerciseId}-${exIndex}`} className="mb-6 bg-gray-900 rounded-3xl overflow-hidden border border-gray-800">
+                                                <View className="p-4 bg-gray-900 text-left">
+                                                    <View className="flex-row justify-between items-start mb-2">
+                                                        <TouchableOpacity
+                                                            onPress={() => setSelectedExercise(ex)}
+                                                            className="flex-row items-center flex-1 active:opacity-70"
+                                                            activeOpacity={0.7}
+                                                        >
+                                                            <Ionicons name="play-circle-outline" size={20} color="#3b82f6" style={{ marginRight: 6 }} />
+                                                            <Text className="text-blue-400 font-bold text-xl flex-1">{ex.name}</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
 
-                            <View className="p-4 bg-gray-900 border-t border-gray-800">
+                                                    {history ? (
+                                                        <Text className="text-gray-500 text-xs text-left">
+                                                            Previous: {history.summary} ({history.date})
+                                                        </Text>
+                                                    ) : (
+                                                        <Text className="text-gray-600 text-xs italic text-left">No prior history found</Text>
+                                                    )}
+                                                </View>
+
+                                                <View className="flex-row bg-gray-800/50 py-2 px-4 border-y border-gray-800">
+                                                    <Text className="w-10 text-gray-400 text-[10px] font-bold uppercase tracking-tight">Set</Text>
+                                                    <View className="flex-1 flex-row items-center">
+                                                        <Text className="flex-1 text-center text-gray-400 text-[10px] font-bold uppercase tracking-tight">KG</Text>
+                                                        <Text className="flex-1 text-center text-gray-400 text-[10px] font-bold uppercase tracking-tight">Reps</Text>
+                                                        <Text className="flex-1 text-center text-gray-400 text-[10px] font-bold uppercase tracking-tight">Volume</Text>
+                                                    </View>
+                                                    <Text className="w-10 text-center text-gray-400 text-[10px] font-bold uppercase tracking-tight">✓</Text>
+                                                </View>
+
+                                                {ex.sets.map((set, setIndex) => {
+                                                    const isActive = activeExIdx === exIndex && activeSetIdx === setIndex;
+                                                    const setVolume = (parseFloat(set.weight) * parseFloat(set.reps) || 0);
+                                                    const prevSet = history?.sets[setIndex];
+
+                                                    return (
+                                                        <Swipeable
+                                                            key={`${ex.exerciseId}-set-${setIndex}`}
+                                                            renderRightActions={() => (
+                                                                <TouchableOpacity onPress={() => removeSet(exIndex, setIndex)} className="bg-red-600 justify-center px-10">
+                                                                    <Ionicons name="trash-outline" size={24} color="white" />
+                                                                </TouchableOpacity>
+                                                            )}
+                                                            onSwipeableRightOpen={() => removeSet(exIndex, setIndex)}
+                                                            rightThreshold={40}
+                                                        >
+                                                            <View className={`flex-row items-center py-3 px-4 bg-gray-900 ${set.completed ? 'bg-green-900/10' : ''} ${isActive ? 'border-l-4 border-blue-500 bg-blue-600/5' : ''}`}>
+                                                                <Text className={`w-10 font-bold ${set.completed ? 'text-green-500' : isActive ? 'text-blue-400' : 'text-gray-500'}`}>
+                                                                    {set.setNumber}
+                                                                </Text>
+
+                                                                <View className="flex-1 flex-row items-center">
+                                                                    <View className="flex-1 px-1 relative">
+                                                                        <TextInput
+                                                                            ref={r => { if (r) inputRefs.current[`${exIndex}-${setIndex}-weight`] = r; }}
+                                                                            className={`bg-gray-800/50 text-white text-center rounded-xl font-bold text-lg ${isActive ? 'border border-blue-500/50 bg-gray-800' : 'border border-transparent'} ${set.completed ? 'opacity-40 text-gray-400' : ''}`}
+                                                                            style={{ paddingVertical: 10, lineHeight: Platform.OS === 'ios' ? 22 : undefined }}
+                                                                            showSoftInputOnFocus={false}
+                                                                            caretHidden={false}
+                                                                            value={set.weight}
+                                                                            onChangeText={(v) => handleSetChange(exIndex, setIndex, 'weight', v)}
+                                                                            onFocus={() => {
+                                                                                setActiveExIdx(exIndex);
+                                                                                setActiveSetIdx(setIndex);
+                                                                                setActiveField('weight');
+                                                                                setKeyboardVisible(true);
+                                                                            }}
+                                                                            maxLength={5}
+                                                                            selectTextOnFocus
+                                                                            placeholder="0"
+                                                                            placeholderTextColor="#374151"
+                                                                            textAlignVertical="center"
+                                                                        />
+                                                                    </View>
+
+                                                                    <View className="flex-1 px-1 relative">
+                                                                        <TextInput
+                                                                            ref={r => { if (r) inputRefs.current[`${exIndex}-${setIndex}-reps`] = r; }}
+                                                                            className={`bg-gray-800/50 text-white text-center rounded-xl font-bold text-lg ${isActive ? 'border border-blue-500/50 bg-gray-800' : 'border border-transparent'} ${set.completed ? 'opacity-40 text-gray-400' : ''}`}
+                                                                            style={{ paddingVertical: 10, lineHeight: Platform.OS === 'ios' ? 22 : undefined }}
+                                                                            showSoftInputOnFocus={false}
+                                                                            caretHidden={false}
+                                                                            value={set.reps}
+                                                                            onChangeText={(v) => handleSetChange(exIndex, setIndex, 'reps', v)}
+                                                                            onFocus={() => {
+                                                                                setActiveExIdx(exIndex);
+                                                                                setActiveSetIdx(setIndex);
+                                                                                setActiveField('reps');
+                                                                                setKeyboardVisible(true);
+                                                                            }}
+                                                                            maxLength={3}
+                                                                            selectTextOnFocus
+                                                                            placeholder="0"
+                                                                            placeholderTextColor="#374151"
+                                                                            textAlignVertical="center"
+                                                                        />
+                                                                    </View>
+
+                                                                    <View className="flex-1 items-center justify-start pt-2.5">
+                                                                        <Text className={`text-xs font-semibold ${set.completed ? 'text-green-600' : 'text-gray-400'}`}>
+                                                                            {setVolume > 0 ? `${setVolume.toFixed(0)} kg` : '-'}
+                                                                        </Text>
+                                                                    </View>
+                                                                </View>
+
+                                                                <TouchableOpacity
+                                                                    onPress={() => toggleSetComplete(exIndex, setIndex)}
+                                                                    className={`w-10 h-10 items-center justify-center rounded-xl ${set.completed ? 'bg-green-600' : 'bg-gray-800/50 border border-gray-700'}`}
+                                                                >
+                                                                    {set.completed ? (
+                                                                        <Ionicons name="checkmark" size={20} color="white" />
+                                                                    ) : (
+                                                                        <View className="w-5 h-5 border-2 border-gray-600 rounded-md" />
+                                                                    )}
+                                                                </TouchableOpacity>
+                                                            </View>
+                                                        </Swipeable>
+                                                    );
+                                                })}
+
+                                                <View className="p-4 flex-row justify-between items-center bg-gray-900/50">
+                                                    <TouchableOpacity
+                                                        onPress={() => addSet(exIndex)}
+                                                        className="flex-row items-center"
+                                                    >
+                                                        <Ionicons name="add-circle-outline" size={20} color="#3b82f6" />
+                                                        <Text className="text-blue-400 font-bold ml-1 text-sm">Add Set</Text>
+                                                    </TouchableOpacity>
+                                                    <Text className="text-gray-500 text-xs font-bold uppercase tracking-widest">
+                                                        Total: <Text className="text-gray-300">{exTotalVolume.toLocaleString()} kg</Text>
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        );
+                                    })}
+
+                                    <TouchableOpacity
+                                        onPress={() => setAddExVisible(true)}
+                                        className="bg-gray-900 border border-dashed border-gray-700 p-6 rounded-3xl items-center flex-row justify-center mb-10"
+                                    >
+                                        <Ionicons name="add-circle" size={24} color="#3b82f6" />
+                                        <Text className="text-blue-400 font-bold ml-2 text-lg">Add Ad-hoc Exercise</Text>
+                                    </TouchableOpacity>
+
+                                    <View className="h-32" />
+                                </ScrollView>
+                            </Pressable>
+
+                            <View className="bg-gray-950">
                                 {isKeyboardVisible ? (
-                                    <View className="flex-row justify-between items-center bg-gray-800 -mx-4 -mt-4 mb-4 px-4 py-2 border-y border-gray-700">
-                                        <TouchableOpacity onPress={focusPrev} className="flex-row items-center px-3 py-2">
-                                            <Ionicons name="chevron-up" size={20} color="#3b82f6" />
-                                            <Text className="text-blue-400 font-bold ml-1 text-sm">Prev Set</Text>
-                                        </TouchableOpacity>
-                                        <View className="items-center">
-                                            <Text className="text-white font-bold text-[10px] uppercase opacity-60">
-                                                Ex {activeExIdx + 1} • Set {activeSetIdx + 1}
-                                            </Text>
-                                        </View>
-                                        <TouchableOpacity onPress={focusNext} className="flex-row items-center px-3 py-2">
-                                            <Text className="text-blue-400 font-bold mr-1 text-sm">Next Set</Text>
-                                            <Ionicons name="chevron-down" size={20} color="#3b82f6" />
+                                    <CustomNumericKeypad
+                                        onNumberPress={handleNumericInput}
+                                        onBackspace={handleBackspace}
+                                        onNext={handleCustomKeyNext}
+                                        onPlusMinus={handlePlusMinus}
+                                        onIncrement={handleIncrement}
+                                        onDecrement={handleDecrement}
+                                        showDecimal={activeField === 'weight'}
+                                    />
+                                ) : (
+                                    <View className="p-4 bg-gray-900 border-t border-gray-800">
+                                        <TouchableOpacity
+                                            onPress={handleFinish}
+                                            disabled={saving}
+                                            className={`bg-green-600 w-full py-4 rounded-2xl items-center shadow-lg ${saving ? 'opacity-70' : ''}`}
+                                        >
+                                            {saving ? (
+                                                <ActivityIndicator color="white" />
+                                            ) : (
+                                                <Text className="text-white font-bold text-lg uppercase tracking-wider">Finish Workout</Text>
+                                            )}
                                         </TouchableOpacity>
                                     </View>
-                                ) : (
-                                    <TouchableOpacity
-                                        onPress={handleFinish}
-                                        disabled={saving}
-                                        className={`bg-green-600 w-full py-4 rounded-2xl items-center shadow-lg ${saving ? 'opacity-70' : ''}`}
-                                    >
-                                        {saving ? (
-                                            <ActivityIndicator color="white" />
-                                        ) : (
-                                            <Text className="text-white font-bold text-lg uppercase tracking-wider">Finish Workout</Text>
-                                        )}
-                                    </TouchableOpacity>
                                 )}
                             </View>
                         </KeyboardAvoidingView>
@@ -593,7 +747,10 @@ export const WorkoutLoggerOverlay = () => {
                                         </TouchableOpacity>
 
                                         <TouchableOpacity
-                                            onPress={() => setRestTimerVisible(false)}
+                                            onPress={() => {
+                                                setRestTimerVisible(false);
+                                                focusNextSetAfterRest();
+                                            }}
                                             className="bg-blue-600 px-8 h-16 rounded-full items-center justify-center flex-1 shadow-lg shadow-blue-500/30"
                                         >
                                             <Text className="text-white font-bold text-lg">Skip Rest</Text>
@@ -625,21 +782,59 @@ export const WorkoutLoggerOverlay = () => {
                                             <Ionicons name="close" size={24} color="#9ca3af" />
                                         </TouchableOpacity>
                                     </View>
+
+                                    {/* Muscle Group Filter */}
+                                    <View className="px-4 py-3 border-b border-gray-800 bg-gray-900">
+                                        <View className="flex-row justify-between items-center mb-2">
+                                            <Text className="text-gray-400 font-bold text-xs uppercase tracking-wider">Filter by Muscle Group</Text>
+                                            {selectedMuscleGroups.length > 0 && (
+                                                <TouchableOpacity onPress={() => setSelectedMuscleGroups([])}>
+                                                    <Text className="text-blue-400 text-xs font-bold">Clear All</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-2">
+                                            <View className="flex-row gap-2 px-2">
+                                                {MUSCLE_GROUPS.map(group => (
+                                                    <TouchableOpacity
+                                                        key={group}
+                                                        onPress={() => toggleMuscleGroup(group)}
+                                                        className={`px-4 py-2 rounded-full border ${selectedMuscleGroups.includes(group)
+                                                            ? 'bg-blue-600 border-blue-500'
+                                                            : 'bg-gray-800/50 border-gray-700'
+                                                            }`}
+                                                    >
+                                                        <Text className={`font-bold text-sm ${selectedMuscleGroups.includes(group) ? 'text-white' : 'text-gray-400'
+                                                            }`}>
+                                                            {group}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+                                        </ScrollView>
+                                    </View>
+
                                     <ScrollView className="p-2">
-                                        {availableExercises.map(ex => (
+                                        {filteredAvailableExercises.map(ex => (
                                             <TouchableOpacity
                                                 key={ex.id}
                                                 onPress={() => {
                                                     addExercise(ex);
                                                     setAddExVisible(false);
+                                                    setSelectedMuscleGroups([]); // Reset filters after selection
                                                 }}
-                                                className="p-4 border-b border-gray-800 flex-row items-center justify-between"
+                                                className="bg-gray-800/50 p-5 rounded-2xl mb-3 border border-gray-800 active:bg-blue-600/10 active:border-blue-600/30"
                                             >
-                                                <View>
-                                                    <Text className="text-white font-bold">{ex.name}</Text>
-                                                    <Text className="text-gray-500 text-xs">{ex.muscle_group} • {ex.equipment}</Text>
+                                                <View className="flex-row justify-between items-center">
+                                                    <View className="flex-1">
+                                                        <Text className="text-white font-bold text-lg mb-1">{ex.name}</Text>
+                                                        <Text className="text-gray-500 text-xs font-bold uppercase tracking-wider">{ex.category}</Text>
+                                                        {ex.muscle_groups && ex.muscle_groups.length > 0 && (
+                                                            <Text className="text-gray-600 text-xs mt-0.5">{ex.muscle_groups.join(', ')}</Text>
+                                                        )}
+                                                    </View>
+                                                    <Ionicons name="chevron-forward" size={20} color="#3b82f6" />
                                                 </View>
-                                                <Ionicons name="add" size={20} color="#3b82f6" />
                                             </TouchableOpacity>
                                         ))}
                                     </ScrollView>
@@ -650,6 +845,53 @@ export const WorkoutLoggerOverlay = () => {
                     </View>
                 </Animated.View>
             </GestureDetector>
+
+            {/* Custom Dialogs */}
+            <ConfirmDialog
+                visible={finishDialogVisible}
+                title={activeWorkout?.hasAdHoc ? "Update Plan Template?" : "Finish Workout"}
+                message={
+                    activeWorkout?.hasAdHoc
+                        ? "You added exercises during this session. Do you want to add them permanently to your workout plan?"
+                        : "Are you sure you want to finish this session?"
+                }
+                buttons={
+                    activeWorkout?.hasAdHoc
+                        ? [
+                            { text: "Update Template", onPress: () => onFinalFinish(true) },
+                            { text: "Only Save Results", onPress: () => onFinalFinish(false) },
+                            { text: "Cancel", style: "cancel", onPress: () => setFinishDialogVisible(false) }
+                        ]
+                        : [
+                            { text: "Finish Workout", style: "destructive", onPress: () => onFinalFinish(false) },
+                            { text: "Resume", style: "cancel", onPress: () => setFinishDialogVisible(false) }
+                        ]
+                }
+                onClose={() => setFinishDialogVisible(false)}
+            />
+
+            <ConfirmDialog
+                visible={successDialogVisible}
+                title="Great Job!"
+                message="Workout saved successfully."
+                buttons={[{ text: "Awesome!", onPress: () => setSuccessDialogVisible(false) }]}
+                onClose={() => setSuccessDialogVisible(false)}
+            />
+
+            <ConfirmDialog
+                visible={errorDialogVisible}
+                title="Error"
+                message={errorMessage}
+                buttons={[{ text: "OK", style: "cancel", onPress: () => setErrorDialogVisible(false) }]}
+                onClose={() => setErrorDialogVisible(false)}
+            />
+
+            {/* Exercise Video Modal */}
+            <ExerciseVideoModal
+                exercise={selectedExercise}
+                visible={!!selectedExercise}
+                onClose={() => setSelectedExercise(null)}
+            />
         </View>
     );
 };

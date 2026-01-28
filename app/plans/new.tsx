@@ -29,6 +29,10 @@ const NewPlan = () => {
     const [allExercises, setAllExercises] = useState<Exercise[]>([]);
     const [showExercisePicker, setShowExercisePicker] = useState(false);
     const [currentPickingDayIndex, setCurrentPickingDayIndex] = useState<number | null>(null);
+    const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<string[]>([]);
+
+    // Available muscle groups for filtering
+    const MUSCLE_GROUPS = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Legs', 'Glutes', 'Core', 'Cardio'];
 
     useEffect(() => {
         loadExercises();
@@ -119,8 +123,35 @@ const NewPlan = () => {
 
     const openExercisePicker = (dayIndex: number) => {
         setCurrentPickingDayIndex(dayIndex);
+        setSelectedMuscleGroups([]); // Reset filters when opening picker
         setShowExercisePicker(true);
     };
+
+    const toggleMuscleGroup = (muscleGroup: string) => {
+        setSelectedMuscleGroups(prev =>
+            prev.includes(muscleGroup)
+                ? prev.filter(mg => mg !== muscleGroup)
+                : [...prev, muscleGroup]
+        );
+    };
+
+    // Filter exercises based on selected muscle groups (exact word matching)
+    const filteredExercises = selectedMuscleGroups.length > 0
+        ? allExercises.filter(exercise =>
+            exercise.muscle_groups?.some(mg => {
+                const mgLower = mg.toLowerCase();
+                return selectedMuscleGroups.some(selected => {
+                    const selectedLower = selected.toLowerCase();
+                    // Match if the muscle group contains the selected word as a whole word
+                    return mgLower === selectedLower ||
+                        mgLower.includes(selectedLower + ' ') ||
+                        mgLower.includes(' ' + selectedLower) ||
+                        mgLower.startsWith(selectedLower + '_') ||
+                        mgLower.endsWith('_' + selectedLower);
+                });
+            })
+        )
+        : allExercises;
 
     const addExerciseToDay = (exercise: Exercise) => {
         if (currentPickingDayIndex === null) return;
@@ -304,15 +335,46 @@ const NewPlan = () => {
             <Modal visible={showExercisePicker} animationType="slide" transparent={true}>
                 <View className="flex-1 bg-black/70 justify-end">
                     <View className="bg-gray-900 rounded-t-[40px] p-8 max-h-[85%] border-t border-gray-800">
-                        <View className="flex-row justify-between items-center mb-6">
+                        <View className="flex-row justify-between items-center mb-4">
                             <Text className="text-white font-bold text-2xl tracking-tight">Select Exercise</Text>
                             <TouchableOpacity onPress={() => setShowExercisePicker(false)} className="bg-gray-800 p-2 rounded-full">
                                 <Ionicons name="close" size={24} color="#6b7280" />
                             </TouchableOpacity>
                         </View>
 
+                        {/* Muscle Group Filter */}
+                        <View className="mb-4">
+                            <View className="flex-row justify-between items-center mb-2">
+                                <Text className="text-gray-400 font-bold text-xs uppercase tracking-wider">Filter by Muscle Group</Text>
+                                {selectedMuscleGroups.length > 0 && (
+                                    <TouchableOpacity onPress={() => setSelectedMuscleGroups([])}>
+                                        <Text className="text-blue-400 text-xs font-bold">Clear All</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-2">
+                                <View className="flex-row gap-2 px-2">
+                                    {MUSCLE_GROUPS.map(group => (
+                                        <TouchableOpacity
+                                            key={group}
+                                            onPress={() => toggleMuscleGroup(group)}
+                                            className={`px-4 py-2 rounded-full border ${selectedMuscleGroups.includes(group)
+                                                ? 'bg-blue-600 border-blue-500'
+                                                : 'bg-gray-800/50 border-gray-700'
+                                                }`}
+                                        >
+                                            <Text className={`font-bold text-sm ${selectedMuscleGroups.includes(group) ? 'text-white' : 'text-gray-400'
+                                                }`}>
+                                                {group}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </ScrollView>
+                        </View>
+
                         <ScrollView showsVerticalScrollIndicator={false}>
-                            {allExercises.map(exercise => (
+                            {filteredExercises.map(exercise => (
                                 <TouchableOpacity
                                     key={exercise.id}
                                     className="bg-gray-800/50 p-5 rounded-2xl mb-3 border border-gray-800 active:bg-blue-600/10 active:border-blue-600/30"
@@ -322,6 +384,9 @@ const NewPlan = () => {
                                         <View>
                                             <Text className="text-white font-bold text-lg mb-1">{exercise.name}</Text>
                                             <Text className="text-gray-500 text-xs font-bold uppercase tracking-wider">{exercise.category}</Text>
+                                            {exercise.muscle_groups && exercise.muscle_groups.length > 0 && (
+                                                <Text className="text-gray-600 text-xs mt-0.5">{exercise.muscle_groups.join(', ')}</Text>
+                                            )}
                                         </View>
                                         <Ionicons name="chevron-forward" size={20} color="#3b82f6" />
                                     </View>

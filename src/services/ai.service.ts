@@ -6,12 +6,13 @@ import { CreatePlanDTO, plannerService } from './planner.service';
 export const aiService = {
     async generateWorkoutPlan(userId: string) {
         // 1. Fetch User Profile
-        const { data: profile } = await supabase
+        const { data: profileData } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', userId)
             .single();
 
+        const profile = profileData as any;
         if (!profile) throw new Error('User profile not found');
 
         // 2. Fetch Available Exercises (to provide context to AI)
@@ -72,7 +73,10 @@ export const aiService = {
     `;
 
         // 4. Call AI
-        const responseText = await generateGeminiContent(prompt, "You are a JSON-only response bot. Do not use markdown blocks.");
+        const responseText = await generateGeminiContent(
+            [{ role: 'user', parts: [{ text: prompt }] }],
+            "You are a JSON-only response bot. Do not use markdown blocks."
+        );
 
         // Clean response (remove ```json ... ``` if present)
         const jsonString = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -124,5 +128,78 @@ export const aiService = {
 
         // 6. Save to DB
         return await plannerService.createPlan(userId, finalPlanData);
+    },
+
+    async getActivePlan(userId: string) {
+        return plannerService.getActivePlan(userId);
+    },
+
+    async analyzeWorkout(userId: string, workoutData: any) {
+        // 1. Fetch User Profile for context
+        const { data: profileData } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
+
+        const profile = profileData as any;
+
+        // 2. Format workout data for the prompt
+        const workoutSummary = workoutData.exercises.map((ex: any) => {
+            const completedSets = ex.sets.filter((s: any) => s.is_completed || s.completed);
+            if (completedSets.length === 0) return null;
+
+            const setsStr = completedSets.map((s: any, i: number) =>
+                `Set ${i + 1}: ${s.weight_kg || s.weight}kg x ${s.reps} reps`
+            ).join(', ');
+
+            return `${ex.name || 'Exercise'}: ${setsStr}`;
+        }).filter(Boolean).join('\n');
+
+        const prompt = `
+        You are an expert fitness coach. Analyze the following completed workout and provide constructive, motivating feedback.
+        
+        User Profile:
+        - Goal: ${profile?.primary_goal || 'Fitness'}
+        - Fitness Level: ${profile?.fitness_level || 'Intermediate'}
+        
+        Workout Session:
+        - Name: ${workoutData.name}
+        - Duration: ${workoutData.durationMinutes} minutes
+        - Exercises Completed:
+        ${workoutSummary}
+        
+        Provide your analysis in a clear, encouraging tone. 
+        Focus on:
+        1. "The Good": What they did well (volume, consistency, session duration).
+        2. "To Improve": Specific suggestions for next time (reps, rest, or variety based on their goal).
+        3. "Coach's Tip": A small, actionable piece of advice.
+        
+        Return ONLY valid JSON (no markdown) with this EXACT structure:
+        {
+          "summary": "One sentence overall summary",
+          "the_good": ["point 1", "point 2"],
+          "to_improve": ["point 1"],
+          "coach_tip": "Specific actionable tip"
+        }
+        `;
+
+        const responseText = await generateGeminiContent(
+            [{ role: 'user', parts: [{ text: prompt }] }],
+            "You are a JSON-only response bot. Do not use markdown blocks."
+        );
+
+        try {
+            const jsonString = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+            return JSON.parse(jsonString);
+        } catch (e) {
+            console.error("AI returned invalid JSON for analysis:", responseText);
+            return {
+                summary: "Great job completing your workout!",
+                the_good: ["You showed up and put in the work.", "Consistency is key to results."],
+                to_improve: ["Keep pushing yourself in future sessions."],
+                coach_tip: "Make sure to stay hydrated and prioritize recovery today."
+            };
+        }
     }
 };

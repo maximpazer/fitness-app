@@ -4,9 +4,9 @@ import { profileService } from '@/services/profile.service';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import {
     ActivityIndicator,
-    Alert,
     Keyboard,
     KeyboardAvoidingView,
     Platform,
@@ -22,6 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function ProfileScreen() {
     const { user, profile, loading: authLoading, signOut } = useAuthContext();
     const router = useRouter();
+    const { showDialog } = useConfirmDialog();
 
     const [loading, setLoading] = useState(false);
     const [displayName, setDisplayName] = useState('');
@@ -56,7 +57,7 @@ export default function ProfileScreen() {
             if (email !== user.email) {
                 const { error: emailError } = await authService.updateEmail(email);
                 if (emailError) throw emailError;
-                Alert.alert('Email Update', 'A confirmation email has been sent to your new address.');
+                showDialog('Email Update', 'A confirmation email has been sent to your new address.');
             }
 
             // 3. Update Password if provided
@@ -71,19 +72,19 @@ export default function ProfileScreen() {
                 if (passwordError) throw passwordError;
                 setNewPassword('');
                 setConfirmPassword('');
-                Alert.alert('Success', 'Password updated successfully');
+                showDialog('Success', 'Password updated successfully');
             }
 
-            Alert.alert('Success', 'Profile updated successfully');
+            showDialog('Success', 'Profile updated successfully');
         } catch (error: any) {
-            Alert.alert('Update Failed', error.message || 'An error occurred while updating your profile');
+            showDialog('Update Failed', error.message || 'An error occurred while updating your profile');
         } finally {
             setLoading(false);
         }
     };
 
     const handleLogout = async () => {
-        Alert.alert(
+        showDialog(
             'Logout',
             'Are you sure you want to log out?',
             [

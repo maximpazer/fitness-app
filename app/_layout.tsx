@@ -60,6 +60,7 @@ function RootLayoutNav() {
 }
 
 import { WorkoutProvider } from '@/context/WorkoutContext';
+import { DialogProvider } from '@/hooks/useConfirmDialog';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function RootLayout() {
@@ -67,7 +68,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <WorkoutProvider>
-          <RootLayoutNav />
+          <DialogProvider>
+            <RootLayoutNav />
+          </DialogProvider>
         </WorkoutProvider>
       </AuthProvider>
     </GestureHandlerRootView>

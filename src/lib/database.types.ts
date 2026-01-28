@@ -29,6 +29,9 @@ export interface Exercise {
     instructions?: string[];
     video_url?: string;
     image_url?: string;
+    gif_url?: string;
+    tips?: string[];
+    exercisedb_id?: string;
     is_compound?: boolean;
     is_custom?: boolean;
 }

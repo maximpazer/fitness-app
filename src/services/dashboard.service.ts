@@ -27,7 +27,14 @@ export const dashboardService = {
             // 3. Get Recent Activity (Last 3)
             const { data: recentActivity } = await supabase
                 .from('completed_workouts')
-                .select('*')
+                .select(`
+                    id,
+                    workout_name,
+                    duration_minutes,
+                    completed_at,
+                    plan_day_id,
+                    plan_days!inner(day_name)
+                `)
                 .eq('user_id', userId)
                 .order('completed_at', { ascending: false })
                 .limit(3)
@@ -41,7 +48,10 @@ export const dashboardService = {
                 displayName: profile?.display_name || 'Athlete',
                 weeklyCount,
                 weeklyMinutes,
-                recentActivity: recentActivity || [],
+                recentActivity: (recentActivity || []).map((w: any) => ({
+                    ...w,
+                    workout_name: w.workout_name || w.plan_days?.day_name || 'Workout'
+                })),
                 chartData: [
                     { x: 'Mon', y: 0 },
                     { x: 'Tue', y: 0 },
@@ -136,16 +146,19 @@ export const dashboardService = {
     },
 
     async getTodayWorkoutStatus(userId: string, planDayId: string) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayISO = today.toISOString();
+        // Check if this specific plan day has been completed recently (within last 24 hours)
+        // This allows for flexible scheduling and accounts for late-night workouts
+        const last24Hours = new Date();
+        last24Hours.setHours(last24Hours.getHours() - 24);
+        const cutoffISO = last24Hours.toISOString();
 
         const { data, error } = await supabase
             .from('completed_workouts')
-            .select('id')
+            .select('id, completed_at')
             .eq('user_id', userId)
             .eq('plan_day_id', planDayId)
-            .gte('completed_at', todayISO)
+            .gte('completed_at', cutoffISO)
+            .order('completed_at', { ascending: false })
             .limit(1);
 
         if (error) throw error;
