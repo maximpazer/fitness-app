@@ -84,9 +84,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                                 <TouchableOpacity
                                     key={index}
                                     onPress={() => handleButtonPress(button)}
-                                    className={`${getButtonStyle(button.style)} py-4 rounded-2xl ${
-                                        isCancel ? 'border border-gray-700' : ''
-                                    }`}
+                                    className={`${getButtonStyle(button.style)} py-4 rounded-2xl ${isCancel ? 'border border-gray-700' : ''
+                                        }`}
                                     activeOpacity={0.8}
                                 >
                                     <Text

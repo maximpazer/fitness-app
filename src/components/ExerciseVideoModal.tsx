@@ -14,6 +14,7 @@ interface ExerciseVideoModalProps {
     tips?: string[] | null;
     muscle_groups?: string[] | null;
     equipment_needed?: string[] | null;
+    target_muscle?: string | null;
     classification?: string | null;
     mechanics?: string | null;
     movement_type?: string | null;
@@ -37,6 +38,7 @@ export function ExerciseVideoModal({ exercise, visible, onClose }: ExerciseVideo
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const isLargeScreen = width > 768;
+  const [isTechExpanded, setIsTechExpanded] = React.useState(false);
 
   if (!exercise) return null;
 
@@ -55,12 +57,12 @@ export function ExerciseVideoModal({ exercise, visible, onClose }: ExerciseVideo
   });
   const hasTips = filteredTips.length > 0;
 
-  const TechBadge = ({ label, value }: { label: string, value?: string | null }) => {
+  const TechnicalRow = ({ label, value }: { label: string, value?: string | null }) => {
     if (!value) return null;
     return (
-      <View className="mb-4 w-1/2 pr-2">
-        <Text className="text-gray-600 text-[10px] uppercase font-bold tracking-tighter mb-0.5">{label}</Text>
-        <Text className="text-gray-200 text-sm font-semibold">{value}</Text>
+      <View className="flex-row items-center justify-between py-2 border-b border-gray-800/30">
+        <Text className="text-gray-500 text-xs font-bold uppercase tracking-wider">{label}</Text>
+        <Text className="text-white text-sm font-semibold">{value}</Text>
       </View>
     );
   };
@@ -124,92 +126,80 @@ export function ExerciseVideoModal({ exercise, visible, onClose }: ExerciseVideo
           <View className="w-10" />
         </View>
 
-        <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: insets.bottom + 100 }}>
-          <View className={isLargeScreen ? 'flex-row gap-8' : 'flex-col'}>
+        <ScrollView className="flex-1" contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 100 }}>
 
-            {/* Left/Top: Media Section */}
-            <View className={isLargeScreen ? 'flex-1' : 'w-full'}>
-              <MediaSection />
+          {/* Media Section - Hero */}
+          <MediaSection />
+
+          {/* Execution Cues - Prime real estate */}
+          <View className="mt-8">
+            <View className="flex-row items-center mb-4 px-1">
+              <View className="w-8 h-8 rounded-xl bg-orange-500/10 items-center justify-center mr-3">
+                <Ionicons name="flash" size={18} color="#f97316" />
+              </View>
+              <Text className="text-xl font-black text-white">Execution Cues</Text>
             </View>
 
-            {/* Right/Bottom: Technical Context, Instructions & Tips */}
-            <View className={isLargeScreen ? 'flex-1' : 'mt-8 w-full'}>
-              <View className="mb-8 bg-gray-900/30 border border-gray-800/50 rounded-[32px] p-6">
-                <View className="flex-row items-center mb-6">
-                  <View className="w-8 h-8 rounded-xl bg-blue-500/10 items-center justify-center mr-3">
-                    <Ionicons name="settings-outline" size={16} color="#3b82f6" />
+            <View className="bg-gray-900/40 rounded-[28px] p-2 border border-blue-500/5">
+              {(exercise.instructions || exercise.tips) ? (
+                [...(exercise.instructions || []), ...(exercise.tips || [])].slice(0, 3).map((step, i) => (
+                  <View key={i} className={`flex-row p-4 ${i !== 2 ? 'border-b border-gray-800/40' : ''}`}>
+                    <View className="w-6 h-6 rounded-full bg-blue-600/10 items-center justify-center mr-4 mt-1 border border-blue-500/10">
+                      <Text className="text-blue-400 text-[10px] font-bold">{i + 1}</Text>
+                    </View>
+                    <Text className="text-base text-gray-300 flex-1 leading-relaxed">{step}</Text>
                   </View>
-                  <Text className="text-gray-400 font-bold text-xs uppercase tracking-[2px]">Technical Context</Text>
-                </View>
-
-                <View className="flex-row flex-wrap">
-                  <TechBadge label="Classification" value={exercise.classification} />
-                  <TechBadge label="Mechanics" value={exercise.mechanics} />
-                  <TechBadge label="Movement" value={exercise.movement_type} />
-                  <TechBadge label="Posture" value={exercise.posture} />
-                  <TechBadge label="Grip" value={exercise.grip} />
-                  <TechBadge label="Force" value={exercise.force_type} />
-                </View>
-
-                {(hasMuscleGroups || hasEquipment) && (
-                  <View className="mt-2 pt-6 border-t border-gray-800/50 flex-row flex-wrap gap-2">
-                    {hasMuscleGroups && exercise.muscle_groups!.map((muscle, i) => (
-                      <View key={`muscle-${i}`} className="bg-blue-600/10 px-3 py-1.5 rounded-xl border border-blue-500/20">
-                        <Text className="text-blue-400 text-[10px] font-black uppercase tracking-wider">{muscle}</Text>
-                      </View>
-                    ))}
-                    {hasEquipment && exercise.equipment_needed!.map((equip, i) => (
-                      <View key={`equip-${i}`} className="bg-gray-800/50 px-3 py-1.5 rounded-xl border border-gray-700/50">
-                        <Text className="text-gray-400 text-[10px] font-black uppercase tracking-wider">{equip}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </View>
-              {hasInstructions && (
-                <View className="mb-8">
-                  <View className="flex-row items-center mb-4 px-2">
-                    <Ionicons name="list" size={20} color="#3b82f6" />
-                    <Text className="text-xl font-bold text-white ml-3">Instructions</Text>
-                  </View>
-                  <View className="bg-gray-900/50 rounded-[32px] p-2 border border-gray-900">
-                    {exercise.instructions!.map((step, i) => (
-                      <View key={i} className={`flex-row p-4 ${i !== exercise.instructions!.length - 1 ? 'border-b border-gray-900' : ''}`}>
-                        <View className="w-8 h-8 rounded-full bg-blue-600/20 items-center justify-center mr-4 mt-1 border border-blue-500/20">
-                          <Text className="text-blue-400 text-xs font-black">{i + 1}</Text>
-                        </View>
-                        <Text className="text-base text-gray-300 flex-1 leading-relaxed">{step}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {hasTips && (
-                <View>
-                  <View className="flex-row items-center mb-4 px-2">
-                    <Ionicons name="sparkles" size={20} color="#f59e0b" />
-                    <Text className="text-xl font-bold text-white ml-3">Pro Tips</Text>
-                  </View>
-                  <View className="bg-gray-900/50 rounded-[32px] p-6 border border-gray-900">
-                    {filteredTips.map((tip, i) => (
-                      <View key={i} className="flex-row mb-4 last:mb-0">
-                        <View className="w-1.5 h-1.5 rounded-full bg-amber-500/50 mt-2 mr-3" />
-                        <Text className="text-base text-gray-400 flex-1 leading-relaxed italic">{tip}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {!hasInstructions && !hasTips && (
-                <View className="bg-gray-900/50 rounded-[32px] p-12 items-center border border-gray-900 border-dashed">
-                  <Ionicons name="information-circle-outline" size={40} color="#374151" />
-                  <Text className="text-gray-500 text-center mt-3 font-medium">Detailed guide coming soon</Text>
+                ))
+              ) : (
+                <View className="p-8 items-center">
+                  <Text className="text-gray-500 italic">No cues available yet</Text>
                 </View>
               )}
             </View>
           </View>
+
+          {/* Muscle Focus */}
+          <View className="mt-8 px-1">
+            <Text className="text-gray-500 text-[10px] uppercase font-bold tracking-widest mb-4">Muscle Focus</Text>
+
+            <View className="flex-row items-center">
+              <View className="bg-blue-600/20 px-4 py-2 rounded-2xl border border-blue-500/30 mr-3">
+                <Text className="text-blue-400 text-[11px] font-black uppercase tracking-wider">
+                  Primary: {exercise.target_muscle || exercise.muscle_groups?.[0] || 'Target'}
+                </Text>
+              </View>
+
+              {exercise.muscle_groups && exercise.muscle_groups.length > (exercise.target_muscle ? 0 : 1) && (
+                <Text className="text-gray-500 text-xs italic flex-1" numberOfLines={1}>
+                  + {exercise.muscle_groups.filter(m => m !== (exercise.target_muscle || exercise.muscle_groups?.[0])).slice(0, 2).join(', ')}
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {/* Technical Data - Collapsible footer */}
+          <View className="mt-12 pt-8 border-t border-gray-900">
+            <Pressable
+              onPress={() => setIsTechExpanded(!isTechExpanded)}
+              className="flex-row items-center justify-between px-1 mb-4"
+            >
+              <View className="flex-row items-center">
+                <Ionicons name="settings-outline" size={14} color="#4b5563" />
+                <Text className="text-gray-600 font-bold text-[10px] uppercase tracking-[2px] ml-2">Technical Data</Text>
+              </View>
+              <Ionicons name={isTechExpanded ? "chevron-up" : "chevron-down"} size={16} color="#4b5563" />
+            </Pressable>
+
+            {isTechExpanded && (
+              <View className="bg-gray-900/20 rounded-2xl p-4 space-y-1">
+                <TechnicalRow label="Movement" value={exercise.movement_type} />
+                <TechnicalRow label="Type" value={exercise.mechanics} />
+                <TechnicalRow label="Posture" value={exercise.posture} />
+                <TechnicalRow label="Equipment" value={exercise.equipment_needed?.join(', ')} />
+              </View>
+            )}
+          </View>
+
         </ScrollView>
       </View>
     </Modal>

@@ -148,5 +148,59 @@ export const workoutService = {
 
         if (error) throw error;
         return data || [];
+    },
+
+    async deleteWorkoutExercise(workoutExerciseId: string) {
+        // First delete all associated sets
+        const { error: setsError } = await supabase
+            .from('workout_sets')
+            .delete()
+            .eq('workout_exercise_id', workoutExerciseId);
+
+        if (setsError) throw setsError;
+
+        // Then delete the workout exercise itself
+        const { error: exerciseError } = await supabase
+            .from('workout_exercises')
+            .delete()
+            .eq('id', workoutExerciseId);
+
+        if (exerciseError) throw exerciseError;
+    },
+
+    async deleteWorkout(workoutId: string) {
+        // Get all workout exercises for this workout
+        const { data: exercises } = await supabase
+            .from('workout_exercises')
+            .select('id')
+            .eq('workout_id', workoutId);
+
+        if (exercises && exercises.length > 0) {
+            const exerciseIds = exercises.map(ex => ex.id);
+            
+            // Delete all sets for these exercises
+            const { error: setsError } = await supabase
+                .from('workout_sets')
+                .delete()
+                .in('workout_exercise_id', exerciseIds);
+
+            if (setsError) throw setsError;
+
+            // Delete all workout exercises
+            const { error: exercisesError } = await supabase
+                .from('workout_exercises')
+                .delete()
+                .eq('workout_id', workoutId);
+
+            if (exercisesError) throw exercisesError;
+        }
+
+        // Finally delete the workout itself
+        const { error: workoutError } = await supabase
+            .from('completed_workouts')
+            .delete()
+            .eq('id', workoutId);
+
+        if (workoutError) throw workoutError;
     }
 };

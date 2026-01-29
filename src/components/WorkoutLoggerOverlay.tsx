@@ -7,6 +7,7 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { plannerService } from '@/services/planner.service';
 import { workoutService } from '@/services/workout.service';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Dimensions, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -153,6 +154,9 @@ export const WorkoutLoggerOverlay = () => {
         updateSet(exIdx, setIdx, { completed: !wasCompleted });
 
         if (!wasCompleted) {
+            // Trigger Light Haptic
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
             // Start Timer
             setRestTimerStart(Date.now());
             setIsResting(true);
@@ -434,7 +438,11 @@ const SessionRestBar = ({ visible, startTime, duration, onSkip }: { visible: boo
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
             const remaining = Math.max(0, duration - elapsed);
             setTimeLeft(remaining);
-            if (remaining === 0) onSkip();
+            if (remaining === 0) {
+                // Trigger Medium Haptic
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onSkip();
+            }
         }, 500);
         return () => clearInterval(interval);
     }, [visible, startTime, duration]);

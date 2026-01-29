@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +29,7 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
     if (!visible) return null;
 
     const handlePress = (key: string) => {
+        Haptics.selectionAsync();
         if (key === 'backspace') {
             onChange(value.slice(0, -1));
         } else if (key === '.') {
@@ -43,6 +45,7 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
     };
 
     const adjust = (delta: number) => {
+        Haptics.selectionAsync();
         const num = parseFloat(value) || 0;
         const next = Math.max(0, num + delta);
         const nextStr = next % 1 === 0 ? next.toString() : next.toFixed(1);

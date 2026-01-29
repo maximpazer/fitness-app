@@ -1,16 +1,19 @@
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { workoutService } from '@/services/workout.service';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function WorkoutSummary() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
+    const { showDialog } = useConfirmDialog();
     const [loading, setLoading] = useState(true);
     const [workout, setWorkout] = useState<any>(null);
+    const [deletingExerciseId, setDeletingExerciseId] = useState<string | null>(null);
 
     useEffect(() => {
         if (!id) return;
@@ -26,6 +29,38 @@ export default function WorkoutSummary() {
         };
         fetchSummary();
     }, [id]);
+
+    const handleDeleteExercise = async (workoutExerciseId: string, exerciseName: string) => {
+        showDialog(
+            'Delete Exercise',
+            `Remove "${exerciseName}" from this workout? This cannot be undone.`,
+            [
+                {
+                    text: 'Delete',
+                    onPress: async () => {
+                        try {
+                            setDeletingExerciseId(workoutExerciseId);
+                            await workoutService.deleteWorkoutExercise(workoutExerciseId);
+                            
+                            // Refresh workout data
+                            const updatedWorkout = await workoutService.getWorkoutSummary(id as string);
+                            setWorkout(updatedWorkout);
+                        } catch (error) {
+                            console.error('Error deleting exercise:', error);
+                            Alert.alert('Error', 'Failed to delete exercise');
+                        } finally {
+                            setDeletingExerciseId(null);
+                        }
+                    },
+                    style: 'destructive'
+                },
+                {
+                    text: 'Cancel',
+                    style: 'cancel'
+                }
+            ]
+        );
+    };
 
     if (loading) {
         return (
@@ -102,7 +137,20 @@ export default function WorkoutSummary() {
                     <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Exercises</Text>
                     {workout.workout_exercises?.map((ex: any, i: number) => (
                         <View key={i} className="bg-gray-900 rounded-2xl p-5 mb-4 border border-gray-800">
-                            <Text className="text-xl font-bold text-blue-400 mb-3">{ex.exercise?.name}</Text>
+                            <View className="flex-row justify-between items-start mb-3">
+                                <Text className="text-xl font-bold text-blue-400 flex-1">{ex.exercise?.name}</Text>
+                                <TouchableOpacity
+                                    onPress={() => handleDeleteExercise(ex.id, ex.exercise?.name)}
+                                    className="bg-red-500/10 p-2 rounded-lg ml-2"
+                                    disabled={deletingExerciseId === ex.id}
+                                >
+                                    {deletingExerciseId === ex.id ? (
+                                        <ActivityIndicator size="small" color="#ef4444" />
+                                    ) : (
+                                        <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                                    )}
+                                </TouchableOpacity>
+                            </View>
 
                             <View className="space-y-2">
                                 {ex.workout_sets?.map((set: any, si: number) => (

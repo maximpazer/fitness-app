@@ -1,6 +1,7 @@
 import { generateGeminiContent } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
 import { CreatePlanDTO, plannerService } from './planner.service';
+import { workoutService } from './workout.service';
 
 export const aiService = {
     async generateWorkoutPlan(userId: string) {
@@ -135,7 +136,7 @@ export const aiService = {
     },
 
     async analyzeWorkout(userId: string, workoutData: any) {
-        // 1. Fetch User Profile for context
+        // 1. Get user profile
         const { data: profileData } = await supabase
             .from('profiles')
             .select('*')
@@ -144,47 +145,87 @@ export const aiService = {
 
         const profile = profileData as any;
 
-        // 2. Format workout data for the prompt, including advanced metadata
+        // 2. Get previous workout history for comparison
+        const recentHistory = await workoutService.getDetailedRecentHistory(userId, 3);
+        
+        // 3. Calculate current workout metrics
+        const currentVolume = workoutData.exercises.reduce((total: number, ex: any) => {
+            return total + ex.sets.reduce((exTotal: number, set: any) => {
+                return set.is_completed ? exTotal + (set.weight_kg * set.reps) : exTotal;
+            }, 0);
+        }, 0);
+        
+        const completedSets = workoutData.exercises.reduce((total: number, ex: any) => {
+            return total + ex.sets.filter((s: any) => s.is_completed).length;
+        }, 0);
+        
+        // 4. Find comparison with similar workout from history
+        let previousComparison = null;
+        if (recentHistory.length > 0) {
+            const lastWorkout = recentHistory[0];
+            const lastVolume = lastWorkout.workout_exercises?.reduce((total: number, ex: any) => {
+                return total + (ex.sets?.reduce((setTotal: number, set: any) => {
+                    return setTotal + (set.weight_kg * set.reps);
+                }, 0) || 0);
+            }, 0) || 0;
+            
+            const volumeChange = currentVolume - lastVolume;
+            const volumeChangePercent = lastVolume > 0 ? ((volumeChange / lastVolume) * 100).toFixed(1) : '0';
+            
+            previousComparison = {
+                lastDate: new Date(lastWorkout.completed_at).toLocaleDateString(),
+                volumeChange,
+                volumeChangePercent,
+                lastVolume
+            };
+        }
+
+        // 5. Format workout data for analysis
         const workoutSummary = workoutData.exercises.map((ex: any) => {
-            const completedSets = ex.sets.filter((s: any) => s.is_completed || s.completed);
+            const completedSets = ex.sets.filter((s: any) => s.is_completed);
             if (completedSets.length === 0) return null;
 
-            const setsStr = completedSets.map((s: any, i: number) =>
-                `Set ${i + 1}: ${s.weight_kg || s.weight}kg x ${s.reps} reps`
-            ).join(', ');
-
-            // Include metadata if available (joined or attached to exercise object)
-            const meta = ex.exercise ? ` [Type: ${ex.exercise.classification}, Mechanics: ${ex.exercise.mechanics}, Movement: ${ex.exercise.movement_type}]` : '';
-
-            return `${ex.name || 'Exercise'}${meta}: ${setsStr}`;
+            const totalVolume = completedSets.reduce((sum: number, s: any) => sum + (s.weight_kg * s.reps), 0);
+            const avgWeight = totalVolume > 0 ? (completedSets.reduce((sum: number, s: any) => sum + s.weight_kg, 0) / completedSets.length).toFixed(1) : '0';
+            
+            return `${ex.name}: ${completedSets.length} sets, avg ${avgWeight}kg, ${totalVolume}kg total volume`;
         }).filter(Boolean).join('\n');
 
         const prompt = `
-        You are an expert fitness coach. Analyze the following completed workout and provide constructive, motivating feedback.
-        
-        User Profile:
-        - Goal: ${profile?.primary_goal || 'Fitness'}
-        - Fitness Level: ${profile?.fitness_level || 'Intermediate'}
-        
-        Workout Session:
-        - Name: ${workoutData.name}
-        - Duration: ${workoutData.durationMinutes} minutes
-        - Exercises Completed:
-        ${workoutSummary}
-        
-        Provide your analysis in a clear, encouraging tone. 
-        Focus on:
-        1. "The Good": What they did well (volume, consistency, session duration).
-        2. "To Improve": Specific suggestions for next time (reps, rest, or variety based on their goal).
-        3. "Coach's Tip": A small, actionable piece of advice.
-        
-        Return ONLY valid JSON (no markdown) with this EXACT structure:
-        {
-          "summary": "One sentence overall summary",
-          "the_good": ["point 1", "point 2"],
-          "to_improve": ["point 1"],
-          "coach_tip": "Specific actionable tip"
-        }
+You are a data-driven fitness coach. Analyze this workout using only the provided data.
+
+CURRENT WORKOUT:
+Name: ${workoutData.name}
+Duration: ${workoutData.durationMinutes} minutes  
+Total Volume: ${currentVolume}kg
+Completed Sets: ${completedSets}
+Exercises:
+${workoutSummary}
+
+${previousComparison ? `COMPARISON TO LAST SESSION (${previousComparison.lastDate}):
+Last Volume: ${previousComparison.lastVolume}kg
+Volume Change: ${previousComparison.volumeChange > 0 ? '+' : ''}${previousComparison.volumeChange}kg (${previousComparison.volumeChangePercent}%)` : 'FIRST RECORDED SESSION - No comparison data available.'}
+
+USER GOAL: ${profile?.primary_goal || 'General Fitness'}
+
+Provide exactly 3 sections:
+
+1) POSITIVE INSIGHT: One specific achievement from today's numbers (volume, sets, consistency, or duration)
+2) COMPARISON: How today compared to previous session (if available) or note this is baseline session  
+3) NEXT SESSION: One concrete recommendation with specific exercise or action
+
+Rules:
+- Be factual and data-focused
+- No motivational fluff or general fitness advice
+- Keep each section to 1-2 sentences max
+- Use the actual numbers provided
+
+Return ONLY valid JSON:
+{
+  "positive_insight": "specific data-based achievement",
+  "comparison": "factual comparison or baseline note", 
+  "next_session": "concrete specific recommendation"
+}
         `;
 
         const responseText = await generateGeminiContent(
@@ -198,10 +239,11 @@ export const aiService = {
         } catch (e) {
             console.error("AI returned invalid JSON for analysis:", responseText);
             return {
-                summary: "Great job completing your workout!",
-                the_good: ["You showed up and put in the work.", "Consistency is key to results."],
-                to_improve: ["Keep pushing yourself in future sessions."],
-                coach_tip: "Make sure to stay hydrated and prioritize recovery today."
+                positive_insight: `Completed ${completedSets} sets with ${currentVolume}kg total volume`,
+                comparison: previousComparison ? 
+                    `${previousComparison.volumeChange > 0 ? 'Increased' : 'Decreased'} volume by ${Math.abs(previousComparison.volumeChange)}kg vs last session` :
+                    "Baseline session recorded - future workouts will compare to this",
+                next_session: "Focus on progressive overload by adding 2.5-5kg to your strongest exercise"
             };
         }
     }

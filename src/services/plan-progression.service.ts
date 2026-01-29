@@ -26,7 +26,8 @@ export const planProgressionService = {
 
         if (error || !lastCompleted) {
             // If no workouts completed yet, return the first training day
-            return plan.days.find(d => d.day_type === 'training') || plan.days[0];
+            // Treat null/undefined day_type as training for backwards compatibility
+            return plan.days.find(d => !d.day_type || d.day_type === 'training') || plan.days[0];
         }
 
         // Find the index of the last completed day
@@ -37,7 +38,8 @@ export const planProgressionService = {
         for (let i = 1; i <= plan.days.length; i++) {
             const nextIdx = (lastDayIdx + i) % plan.days.length;
             const nextDay = plan.days[nextIdx];
-            if (nextDay.day_type === 'training') {
+            // Treat null/undefined day_type as training for backwards compatibility
+            if (!nextDay.day_type || nextDay.day_type === 'training') {
                 return nextDay;
             }
         }
@@ -63,7 +65,8 @@ export const planProgressionService = {
         for (let i = 1; i <= plan.days.length && sequence.length < count; i++) {
             const nextIdx = (currentIdx + i) % plan.days.length;
             const nextDay = plan.days[nextIdx];
-            if (nextDay.day_type === 'training') {
+            // Treat null/undefined day_type as training for backwards compatibility
+            if (!nextDay.day_type || nextDay.day_type === 'training') {
                 sequence.push(nextDay);
             }
         }

@@ -7,6 +7,7 @@ import { exerciseService } from '@/services/exercise.service';
 import { metricsService } from '@/services/metrics.service';
 import { planProgressionService } from '@/services/plan-progression.service';
 import { plannerService } from '@/services/planner.service';
+import { workoutService } from '@/services/workout.service';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { useRouter } from 'expo-router';
@@ -30,6 +31,7 @@ export default function Dashboard() {
   const [showMetricsModal, setShowMetricsModal] = useState(false);
   const [weightInput, setWeightInput] = useState('');
   const [todayWorkoutCompleted, setTodayWorkoutCompleted] = useState(false);
+  const [completedWorkoutDetails, setCompletedWorkoutDetails] = useState<any>(null);
   const [planExercises, setPlanExercises] = useState<any[]>([]);
   const [selectedExercises, setSelectedExercises] = useState<string[]>([]);
   const [exerciseProgressData, setExerciseProgressData] = useState<Map<string, any>>(new Map());
@@ -39,6 +41,8 @@ export default function Dashboard() {
   const [manuallySelectedDayId, setManuallySelectedDayId] = useState<string | null>(null);
   const [workoutAnalysis, setWorkoutAnalysis] = useState<any>(null);
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  const [deletingWorkoutId, setDeletingWorkoutId] = useState<string | null>(null);
+  const [last7Days, setLast7Days] = useState<boolean[]>([]);
   const router = useRouter();
 
   const loadData = useCallback(async () => {
@@ -66,11 +70,33 @@ export default function Dashboard() {
         });
         setPlanExercises(Array.from(uniqueExercises.values()));
 
-        // Use plan progression service to determine today's workout
-        const suggestedWorkout = await planProgressionService.getSuggestedWorkoutDay(user.id, plan);
+        // First, check if any workout was completed today
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        
+        const { data: todayCompleted } = await supabase
+          .from('completed_workouts')
+          .select('plan_day_id')
+          .eq('user_id', user.id)
+          .in('plan_day_id', plan.days.map(d => d.id))
+          .gte('completed_at', startOfToday.toISOString())
+          .order('completed_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-        // Use manually selected day if available, otherwise suggested
-        const workout = plan.days.find(d => d.id === manuallySelectedDayId) || suggestedWorkout || plan.days[0];
+        let workout;
+        if (manuallySelectedDayId) {
+          // Use manually selected day if available
+          workout = plan.days.find(d => d.id === manuallySelectedDayId);
+        } else if (todayCompleted) {
+          // If a workout was completed today, show it as today's workout
+          workout = plan.days.find(d => d.id === (todayCompleted as any).plan_day_id);
+        } else {
+          // Otherwise, use plan progression to suggest next workout
+          const suggestedWorkout = await planProgressionService.getSuggestedWorkoutDay(user.id, plan);
+          workout = suggestedWorkout || plan.days[0];
+        }
+        
         setTodayWorkout(workout);
 
         // Find yesterday's workout (the one actually completed last)
@@ -93,14 +119,53 @@ export default function Dashboard() {
 
         // Find tomorrow's workout (next training day in adjusted sequence)
         const sequence = planProgressionService.getUpcomingSequence(plan, workout.id, 1);
-        setTomorrowWorkout(sequence[0] || plan.days.find(d => d.day_type === 'training'));
+        setTomorrowWorkout(sequence[0] || plan.days.find(d => !d.day_type || d.day_type === 'training'));
 
         // Check if today's workout is completed
         if (workout) {
           const isCompleted = await dashboardService.getTodayWorkoutStatus(user.id, workout.id);
           setTodayWorkoutCompleted(isCompleted);
+          
+          // If completed, fetch the workout details
+          if (isCompleted) {
+            const last24Hours = new Date();
+            last24Hours.setHours(last24Hours.getHours() - 24);
+            const { data: completedData } = await supabase
+              .from('completed_workouts')
+              .select('*, workout_exercises(*, exercises(*))')
+              .eq('user_id', user.id)
+              .eq('plan_day_id', workout.id)
+              .gte('completed_at', last24Hours.toISOString())
+              .order('completed_at', { ascending: false })
+              .limit(1)
+              .single();
+            
+            setCompletedWorkoutDetails(completedData);
+          } else {
+            setCompletedWorkoutDetails(null);
+          }
         }
       }
+
+      // Load last 7 days consistency data
+      const last7DaysData = [];
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        date.setHours(0, 0, 0, 0);
+        const nextDay = new Date(date);
+        nextDay.setDate(nextDay.getDate() + 1);
+
+        const { data: dayWorkouts } = await supabase
+          .from('completed_workouts')
+          .select('id')
+          .eq('user_id', user.id)
+          .gte('completed_at', date.toISOString())
+          .lt('completed_at', nextDay.toISOString());
+
+        last7DaysData.push(dayWorkouts && dayWorkouts.length > 0);
+      }
+      setLast7Days(last7DaysData);
 
       // Try to load weight data (may fail if table doesn't exist yet)
       try {
@@ -130,10 +195,13 @@ export default function Dashboard() {
 
   // Set callback to refresh dashboard when workout completes
   useEffect(() => {
-    setOnWorkoutComplete(() => (analysis?: any) => {
+    setOnWorkoutComplete(() => async (analysis?: any) => {
       setManuallySelectedDayId(null); // Reset manual selection when a workout is completed
-      loadData();
+      
+      // Reload dashboard data first to show completed state
+      await loadData();
 
+      // Then show the analysis modal
       if (analysis) {
         setWorkoutAnalysis(analysis);
         setShowAnalysisModal(true);
@@ -153,6 +221,35 @@ export default function Dashboard() {
     } catch (error) {
       console.error('Failed to load exercise progress:', error);
     }
+  };
+
+  const handleDeleteWorkout = async (workoutId: string, workoutName: string) => {
+    showDialog(
+      'Delete Workout',
+      `Are you sure you want to delete "${workoutName}"? This cannot be undone.`,
+      [
+        {
+          text: 'Delete',
+          onPress: async () => {
+            try {
+              setDeletingWorkoutId(workoutId);
+              await workoutService.deleteWorkout(workoutId);
+              await loadData(); // Refresh dashboard
+            } catch (error) {
+              console.error('Error deleting workout:', error);
+              showDialog('Error', 'Failed to delete workout');
+            } finally {
+              setDeletingWorkoutId(null);
+            }
+          },
+          style: 'destructive'
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ]
+    );
   };
 
   const handleExerciseSelection = (exerciseId: string) => {
@@ -244,13 +341,27 @@ export default function Dashboard() {
         <View className="py-6 mb-20">
           {/* Header */}
           <View className="flex-row justify-between items-start mb-6">
-            <View>
+            <View className="flex-1">
               <Text className="text-3xl font-bold text-white">
                 Hello, {data?.displayName?.split(' ')[0] || 'Athlete'}!
               </Text>
               <Text className="text-gray-400 mt-1">
                 {format(new Date(), 'EEEE, d MMMM')}
               </Text>
+              
+              {/* Consistency Indicators - Last 7 Days */}
+              {last7Days.length > 0 && (
+                <View className="flex-row items-center mt-3 gap-1.5">
+                  {last7Days.map((hasWorkout, index) => (
+                    <View
+                      key={index}
+                      className={`w-2 h-2 rounded-full ${
+                        hasWorkout ? 'bg-blue-500' : 'bg-gray-700'
+                      }`}
+                    />
+                  ))}
+                </View>
+              )}
             </View>
             <TouchableOpacity onPress={() => router.push('/profile' as any)} className="w-10 h-10 bg-gray-800 rounded-full items-center justify-center">
               <Text className="text-xl">👤</Text>
@@ -282,7 +393,7 @@ export default function Dashboard() {
 
               {/* Today - Prominent Card */}
               <View
-                className={`p-6 rounded-3xl ${todayWorkoutCompleted ? 'bg-green-600/20 border border-green-500/30' : 'bg-blue-600 shadow-lg shadow-blue-500/50'}`}
+                className={`p-6 rounded-3xl ${todayWorkoutCompleted ? 'bg-gray-800/60 border border-gray-700/50' : 'bg-blue-600 shadow-lg shadow-blue-500/50'}`}
               >
                 <TouchableOpacity
                   onPress={handleStartWorkout}
@@ -290,19 +401,17 @@ export default function Dashboard() {
                   className="flex-row justify-between items-center"
                 >
                   <View className="flex-1">
-                    <Text className={`font-medium mb-1 ${todayWorkoutCompleted ? 'text-green-400' : 'text-blue-100'}`}>
-                      {todayWorkoutCompleted ? "Today's Workout Done" : "Today's Workout"}
+                    <Text className={`font-medium mb-1 ${todayWorkoutCompleted ? 'text-gray-400' : 'text-blue-100'}`}>
+                      Today's Workout
                     </Text>
-                    <Text className={`${todayWorkoutCompleted ? 'text-xl' : 'text-3xl'} font-bold text-white mb-2`}>
+                    <Text className={`${todayWorkoutCompleted ? 'text-2xl' : 'text-3xl'} font-bold text-white mb-2`}>
                       {todayWorkout.day_name || `Day ${todayWorkout.day_number}`}
                     </Text>
-                    {!todayWorkoutCompleted && (
-                      <View className="flex-row items-center bg-blue-500/30 self-start px-3 py-1 rounded-full">
-                        <Text className="text-white text-xs font-medium">
-                          {todayWorkout.exercises?.length || 0} exercises • {todayWorkout.day_type}
-                        </Text>
-                      </View>
-                    )}
+                    <View className={`flex-row items-center self-start px-3 py-1 rounded-full ${todayWorkoutCompleted ? 'bg-gray-700/50' : 'bg-blue-500/30'}`}>
+                      <Text className={`text-xs font-medium ${todayWorkoutCompleted ? 'text-gray-300' : 'text-white'}`}>
+                        {todayWorkoutCompleted ? 'Completed today' : (todayWorkout.day_type || 'training')} • {todayWorkout.exercises?.length || 0} exercises
+                      </Text>
+                    </View>
                   </View>
                   {!todayWorkoutCompleted && (
                     <View className="w-12 h-12 bg-white/20 rounded-full items-center justify-center">
@@ -310,17 +419,38 @@ export default function Dashboard() {
                     </View>
                   )}
                   {todayWorkoutCompleted && (
-                    <Ionicons name="checkmark-circle" size={32} color="#4ade80" />
+                    <View className="w-12 h-12 bg-green-500/20 rounded-full items-center justify-center">
+                      <Ionicons name="checkmark" size={28} color="#22c55e" />
+                    </View>
                   )}
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  onPress={() => setShowWorkoutSwitcher(true)}
-                  className="mt-4 flex-row items-center justify-center bg-black/10 py-2.5 rounded-xl border border-white/10"
-                >
-                  <Ionicons name="swap-horizontal" size={16} color="white" />
-                  <Text className="text-white font-bold ml-2">Switch Day</Text>
-                </TouchableOpacity>
+                {todayWorkoutCompleted ? (
+                  <View className="mt-4 space-y-2">
+                    <TouchableOpacity
+                      className="flex-row items-center justify-center bg-gray-700/50 py-3 rounded-xl border border-gray-600/50"
+                      disabled
+                    >
+                      <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                      <Text className="text-green-400 font-bold ml-2">Workout Completed</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setShowAnalysisModal(true)}
+                      className="flex-row items-center justify-center bg-blue-600/20 py-3 rounded-xl border border-blue-500/30"
+                    >
+                      <Ionicons name="analytics" size={16} color="#3b82f6" />
+                      <Text className="text-blue-400 font-bold ml-2">View Summary</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => setShowWorkoutSwitcher(true)}
+                    className="mt-4 flex-row items-center justify-center bg-black/10 py-2.5 rounded-xl border border-white/10"
+                  >
+                    <Ionicons name="swap-horizontal" size={16} color="white" />
+                    <Text className="text-white font-bold ml-2">Reschedule</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* Tomorrow - Small Card */}
@@ -552,12 +682,14 @@ export default function Dashboard() {
           <Text className="text-lg font-bold text-white mb-4">Recent History</Text>
           {data?.recentActivity?.length > 0 ? (
             data.recentActivity.map((workout: any, i: number) => (
-              <TouchableOpacity
+              <View
                 key={i}
-                onPress={() => router.push(`/workout/summary/${workout.id}` as any)}
-                className="bg-gray-900 p-4 rounded-2xl mb-3 flex-row items-center justify-between border border-gray-800 active:bg-gray-800"
+                className="bg-gray-900 p-4 rounded-2xl mb-3 border border-gray-800 flex-row items-center justify-between"
               >
-                <View className="flex-row items-center flex-1">
+                <TouchableOpacity
+                  onPress={() => router.push(`/workout/summary/${workout.id}` as any)}
+                  className="flex-row items-center flex-1"
+                >
                   <View className="h-10 w-10 bg-blue-900/20 rounded-xl items-center justify-center mr-4">
                     <Ionicons name="calendar-outline" size={20} color="#3b82f6" />
                   </View>
@@ -567,9 +699,23 @@ export default function Dashboard() {
                       {format(new Date(workout.completed_at), 'MMM d')} • {workout.duration_minutes} mins
                     </Text>
                   </View>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color="#4b5563" />
-              </TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={18} color="#4b5563" className="mr-2" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleDeleteWorkout(workout.id, workout.workout_name || 'Workout');
+                  }}
+                  className="bg-red-500/10 p-2.5 rounded-lg ml-2"
+                  disabled={deletingWorkoutId === workout.id}
+                >
+                  {deletingWorkoutId === workout.id ? (
+                    <ActivityIndicator size="small" color="#ef4444" />
+                  ) : (
+                    <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                  )}
+                </TouchableOpacity>
+              </View>
             ))
           ) : (
             <View className="bg-gray-900 p-6 rounded-2xl items-center border border-gray-800">
@@ -647,7 +793,7 @@ export default function Dashboard() {
             </View>
 
             <ScrollView className="max-h-[60vh]" showsVerticalScrollIndicator={false}>
-              {activePlan?.days?.filter((d: any) => d.day_type === 'training').map((day: any) => (
+              {activePlan?.days?.filter((d: any) => !d.day_type || d.day_type === 'training').map((day: any) => (
                 <TouchableOpacity
                   key={day.id}
                   className={`p-5 rounded-2xl mb-3 flex-row items-center justify-between border ${day.id === todayWorkout?.id
@@ -765,53 +911,53 @@ export default function Dashboard() {
 
             <View className="items-center mb-6">
               <View className="bg-blue-600/20 p-4 rounded-2xl mb-4">
-                <Ionicons name="sparkles" size={32} color="#3b82f6" />
+                <Ionicons name="analytics" size={32} color="#3b82f6" />
               </View>
               <Text className="text-white font-bold text-2xl text-center">Workout Analysis</Text>
-              <Text className="text-gray-400 text-center mt-2 px-4 italic leading-5">
-                "{workoutAnalysis?.summary}"
+              <Text className="text-gray-400 text-center mt-2 text-sm">
+                Data-driven insights from your session
               </Text>
             </View>
 
             <ScrollView className="max-h-[50vh]" showsVerticalScrollIndicator={false}>
-              {/* THE GOOD */}
+              {/* POSITIVE INSIGHT */}
               <View className="mb-6">
                 <View className="flex-row items-center mb-3">
                   <View className="bg-green-500/20 p-1.5 rounded-lg mr-2">
-                    <Ionicons name="checkmark" size={16} color="#22c55e" />
+                    <Ionicons name="trophy" size={16} color="#22c55e" />
                   </View>
-                  <Text className="text-green-400 font-bold uppercase tracking-widest text-[10px]">The Good</Text>
+                  <Text className="text-green-400 font-bold uppercase tracking-widest text-[10px]">Achievement</Text>
                 </View>
-                {workoutAnalysis?.the_good?.map((point: string, i: number) => (
-                  <View key={i} className="flex-row items-start mb-2 bg-gray-800/40 p-3 rounded-xl">
-                    <Text className="text-gray-200 text-sm leading-5">{point}</Text>
-                  </View>
-                ))}
+                <View className="bg-gray-800/40 p-4 rounded-xl">
+                  <Text className="text-gray-200 text-sm leading-5 font-medium">
+                    {workoutAnalysis?.positive_insight}
+                  </Text>
+                </View>
               </View>
 
-              {/* TO IMPROVE */}
+              {/* COMPARISON */}
               <View className="mb-6">
                 <View className="flex-row items-center mb-3">
-                  <View className="bg-amber-500/20 p-1.5 rounded-lg mr-2">
-                    <Ionicons name="trending-up" size={16} color="#f59e0b" />
+                  <View className="bg-purple-500/20 p-1.5 rounded-lg mr-2">
+                    <Ionicons name="bar-chart" size={16} color="#a855f7" />
                   </View>
-                  <Text className="text-amber-400 font-bold uppercase tracking-widest text-[10px]">To Improve</Text>
+                  <Text className="text-purple-400 font-bold uppercase tracking-widest text-[10px]">vs Last Session</Text>
                 </View>
-                {workoutAnalysis?.to_improve?.map((point: string, i: number) => (
-                  <View key={i} className="flex-row items-start mb-2 bg-gray-800/40 p-3 rounded-xl">
-                    <Text className="text-gray-200 text-sm leading-5">{point}</Text>
-                  </View>
-                ))}
+                <View className="bg-gray-800/40 p-4 rounded-xl">
+                  <Text className="text-gray-200 text-sm leading-5 font-medium">
+                    {workoutAnalysis?.comparison}
+                  </Text>
+                </View>
               </View>
 
-              {/* COACH'S TIP */}
+              {/* NEXT SESSION */}
               <View className="bg-blue-600/10 border border-blue-500/20 p-4 rounded-2xl">
                 <View className="flex-row items-center mb-2">
-                  <Ionicons name="bulb" size={18} color="#3b82f6" className="mr-2" />
-                  <Text className="text-blue-400 font-bold text-xs uppercase tracking-widest">Coach's Tip</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#3b82f6" className="mr-2" />
+                  <Text className="text-blue-400 font-bold text-xs uppercase tracking-widest">Next Session</Text>
                 </View>
                 <Text className="text-gray-200 text-sm leading-5 font-medium">
-                  {workoutAnalysis?.coach_tip}
+                  {workoutAnalysis?.next_session}
                 </Text>
               </View>
             </ScrollView>
@@ -820,7 +966,7 @@ export default function Dashboard() {
               className="bg-blue-600 py-4 rounded-2xl mt-8 shadow-lg shadow-blue-500/20"
               onPress={() => setShowAnalysisModal(false)}
             >
-              <Text className="text-white font-bold text-center text-lg">Awesome, thanks!</Text>
+              <Text className="text-white font-bold text-center text-lg">Got it!</Text>
             </TouchableOpacity>
           </View>
         </View>
