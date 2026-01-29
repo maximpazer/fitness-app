@@ -127,8 +127,8 @@ export const aiService = {
             days: mappedDays
         };
 
-        // 6. Save to DB
-        return await plannerService.createPlan(userId, finalPlanData);
+        // 6. Save to DB (archive old plan with 'ai_update' reason)
+        return await plannerService.createPlan(userId, finalPlanData, 'ai_update');
     },
 
     async getActivePlan(userId: string) {

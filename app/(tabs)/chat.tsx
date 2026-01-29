@@ -1,7 +1,9 @@
 import { useAuthContext } from '@/context/AuthContext';
+import { usePlan } from '@/context/PlanContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { ChatMessage, generateOpenAIContentWithTools } from '@/lib/openai';
 import { AI_TOOLS, aiToolsService } from '@/services/ai-tools.service';
+import { canonicalExerciseService } from '@/services/canonical-exercise.service';
 import { dashboardService } from '@/services/dashboard.service';
 import { exerciseService } from '@/services/exercise.service';
 import { metricsService } from '@/services/metrics.service';
@@ -205,6 +207,7 @@ const InsightCard = ({ insight, onDismiss }: { insight: AutoInsight; onDismiss: 
 
 export default function Chat() {
     const { user, profile } = useAuthContext();
+    const { refreshPlan } = usePlan();
     const { showDialog } = useConfirmDialog();
     const insets = useSafeAreaInsets();
     const [messages, setMessages] = useState<Message[]>([]);
@@ -259,127 +262,117 @@ export default function Chat() {
         };
     };
 
-    const mapProposalExercises = (p: any) => {
-        // Normalize first to handle different formats
+    // Async function to map canonical names to actual exercises
+    const mapProposalExercisesAsync = async (p: any): Promise<any> => {
         const normalized = normalizeProposal(p);
         if (!normalized) return null;
-        
-        const exercises = metadata?.exercises || [];
         
         // Helper to parse rep range string into min/max
         const parseReps = (repsStr: string): { min: number; max: number } => {
             if (!repsStr) return { min: 8, max: 12 };
-            
-            // Handle range format: "8-12"
             if (repsStr.includes('-')) {
                 const [min, max] = repsStr.split('-').map(s => parseInt(s.trim()));
                 return { min: min || 8, max: max || 12 };
             }
-            
-            // Handle single number: "5"
             const num = parseInt(repsStr);
-            if (!isNaN(num)) {
-                return { min: num, max: num };
-            }
-            
-            // Fallback
+            if (!isNaN(num)) return { min: num, max: num };
             return { min: 8, max: 12 };
         };
         
-        // Helper to normalize exercise name for matching
-        const normalizeForMatch = (name: string) => {
-            return name.toLowerCase()
-                .replace(/[-_]/g, ' ')
-                .replace(/\s+/g, ' ')
-                .trim();
-        };
+        // Collect all canonical names from the proposal
+        const allCanonicalNames: string[] = [];
+        for (const day of normalized.days) {
+            if (Array.isArray(day.exercises)) {
+                for (const ex of day.exercises) {
+                    const name = ex.exercise_name || ex.name;
+                    if (name) allCanonicalNames.push(name);
+                }
+            }
+        }
         
-        // Helper to find best match for an exercise name
-        const findExercise = (searchName: string) => {
-            const normalizedSearch = normalizeForMatch(searchName);
+        // Get user equipment from profile
+        const userEquipment = metadata?.profile?.available_equipment || [];
+        const userDifficulty = metadata?.profile?.fitness_level || 'intermediate';
+        
+        // Batch fetch all variants at once (efficient!)
+        const variantMap = await canonicalExerciseService.selectVariantsBatch(
+            allCanonicalNames,
+            userEquipment,
+            userDifficulty
+        );
+        
+        // Also keep the old fuzzy matcher as fallback (for backward compatibility)
+        const exercises = metadata?.exercises || [];
+        const findExerciseFallback = (searchName: string) => {
+            const normalizedSearch = searchName.toLowerCase().replace(/[-_]/g, ' ').trim();
             const searchWords = normalizedSearch.split(' ').filter(w => w.length > 2);
             
-            // 1. Exact match
             let found = exercises.find((e: any) => 
-                normalizeForMatch(e.name) === normalizedSearch
+                e.name.toLowerCase().replace(/[-_]/g, ' ').trim() === normalizedSearch
             );
             if (found) return found;
             
-            // 2. Full name contains search or vice versa
-            found = exercises.find((e: any) => {
-                const eName = normalizeForMatch(e.name);
-                return eName.includes(normalizedSearch) || normalizedSearch.includes(eName);
-            });
-            if (found) return found;
-            
-            // 3. Word-based matching: find exercise with most matching words
-            // This helps when AI says "Barbell Deadlift" but DB has "Barbell Conventional Deadlift"
+            // Word-based matching
             let bestMatch: any = null;
             let bestScore = 0;
-            
             for (const ex of exercises) {
-                const exWords = normalizeForMatch(ex.name).split(' ').filter((w: string) => w.length > 2);
+                const exWords = ex.name.toLowerCase().split(' ').filter((w: string) => w.length > 2);
                 let matchCount = 0;
-                
-                for (const searchWord of searchWords) {
-                    if (exWords.some((exWord: string) => 
-                        exWord.includes(searchWord) || searchWord.includes(exWord)
-                    )) {
-                        matchCount++;
-                    }
+                for (const sw of searchWords) {
+                    if (exWords.some((ew: string) => ew.includes(sw) || sw.includes(ew))) matchCount++;
                 }
-                
-                // Require at least 2 word matches and calculate score
                 if (matchCount >= 2) {
                     const score = matchCount / Math.max(searchWords.length, exWords.length);
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestMatch = ex;
-                    }
+                    if (score > bestScore) { bestScore = score; bestMatch = ex; }
                 }
             }
-            
-            // Accept if at least 60% word match
-            if (bestMatch && bestScore >= 0.6) {
-                if (__DEV__) console.log(`[Plan] Fuzzy matched "${searchName}" -> "${bestMatch.name}" (score: ${bestScore.toFixed(2)})`);
-                return bestMatch;
-            }
-            
+            if (bestMatch && bestScore >= 0.5) return bestMatch;
             return null;
         };
         
-        return {
-            ...normalized,
-            days: normalized.days.map((day: any) => ({
-                ...day,
-                day_type: day.day_type || 'training', // Default to training if not specified
-                exercises: Array.isArray(day.exercises) ? day.exercises.map((ex: any, index: number) => {
-                    // If already has valid UUID, keep it
-                    if (ex.exercise_id && ex.exercise_id.length > 20) {
-                        const reps = parseReps(ex.target_reps || '8-12');
-                        return { 
-                            ...ex, 
-                            order_in_workout: ex.order_in_workout ?? index + 1,
-                            target_sets: ex.target_sets || 3,
-                            target_reps_min: reps.min,
-                            target_reps_max: reps.max,
-                            rest_seconds: ex.rest_seconds || 90
-                        };
-                    }
-                    
-                    // Try to find exercise by name
-                    const name = ex.exercise_name || ex.name;
-                    if (!name) return null;
-                    
-                    const found = findExercise(name);
-                    
-                    if (!found) {
-                        console.warn(`[Plan] Could not map exercise: "${name}"`);
-                        return null;
-                    }
-                    
+        // Map each day's exercises
+        const mappedDays = normalized.days.map((day: any) => ({
+            ...day,
+            day_type: day.day_type || 'training',
+            exercises: Array.isArray(day.exercises) ? day.exercises.map((ex: any, index: number) => {
+                // If already has valid UUID, keep it
+                if (ex.exercise_id && ex.exercise_id.length > 20) {
                     const reps = parseReps(ex.target_reps || '8-12');
-                    
+                    return { 
+                        ...ex, 
+                        order_in_workout: ex.order_in_workout ?? index + 1,
+                        target_sets: ex.target_sets || 3,
+                        target_reps_min: reps.min,
+                        target_reps_max: reps.max,
+                        rest_seconds: ex.rest_seconds || 90
+                    };
+                }
+                
+                const name = ex.exercise_name || ex.name;
+                if (!name) return null;
+                
+                // Try canonical lookup first
+                const variant = variantMap.get(name);
+                if (variant) {
+                    if (__DEV__) console.log(`[Plan] Canonical: "${name}" -> "${variant.name}"`);
+                    const reps = parseReps(ex.target_reps || '8-12');
+                    return {
+                        ...ex,
+                        exercise_id: variant.id,
+                        exercise_name: variant.name, // Update to actual variant name
+                        order_in_workout: ex.order_in_workout ?? index + 1,
+                        target_sets: ex.target_sets || 3,
+                        target_reps_min: reps.min,
+                        target_reps_max: reps.max,
+                        rest_seconds: ex.rest_seconds || 90
+                    };
+                }
+                
+                // Fallback to fuzzy matching (for old proposals or edge cases)
+                const found = findExerciseFallback(name);
+                if (found) {
+                    if (__DEV__) console.log(`[Plan] Fallback match: "${name}" -> "${found.name}"`);
+                    const reps = parseReps(ex.target_reps || '8-12');
                     return {
                         ...ex,
                         exercise_id: found.id,
@@ -389,8 +382,26 @@ export default function Chat() {
                         target_reps_max: reps.max,
                         rest_seconds: ex.rest_seconds || 90
                     };
-                }).filter(Boolean) : [] // Filter out null (unmapped) exercises
-            }))
+                }
+                
+                console.warn(`[Plan] Could not map exercise: "${name}"`);
+                return null;
+            }).filter(Boolean) : []
+        }));
+        
+        return { ...normalized, days: mappedDays };
+    };
+
+    // Sync wrapper for backward compatibility (uses cached metadata)
+    const mapProposalExercises = (p: any) => {
+        const normalized = normalizeProposal(p);
+        if (!normalized) return null;
+        
+        // For sync usage, just return normalized with placeholder IDs
+        // Real mapping happens in acceptPlan via mapProposalExercisesAsync
+        return {
+            ...normalized,
+            _needsAsyncMapping: true,
         };
     };
 
@@ -624,7 +635,7 @@ AVAILABLE TOOLS:
 - compare_workout_periods: Compare this_week vs last_week, etc.
 - get_last_exercise_load: Quick lookup of last weight/reps for exercise
 - get_body_metrics_trend: Body weight trend
-- search_exercises: Search 3200+ exercises by name/equipment/muscle.
+- search_exercises: Search CANONICAL exercises (30 core movements). Returns canonical_name to use in plans.
 - create_plan_proposal: Create an interactive plan proposal (ONLY when explicitly asked for a plan).
 
 CRITICAL BEHAVIOR RULES:
@@ -637,21 +648,26 @@ USER PROFILE: ${JSON.stringify(metadata?.profile || {})}
 USER'S AVAILABLE EQUIPMENT: ${JSON.stringify(metadata?.profile?.available_equipment || ['Barbell', 'Dumbbell', 'Cable', 'Machine'])}
 ACTIVE PLAN: ${JSON.stringify(metadata?.activePlan?.name || "No active plan")}
 
+CANONICAL EXERCISE SYSTEM:
+You select from 30 standard exercise types (bench_press, squat, deadlift, etc).
+The system automatically picks the best variant based on user's equipment.
+Example: You say "bench_press" → User with dumbbells gets "Dumbbell Bench Press"
+
 PLAN CREATION WORKFLOW (ONLY when user asks for a plan):
-1. Do 2-4 exercise searches maximum (chest, back, legs, arms)
-2. IMMEDIATELY call create_plan_proposal with exercises found - DO NOT search more than 4 times
-3. For EACH exercise, you MUST provide: exercise_name, target_sets (3-5), target_reps (e.g., "8-12", "5", "15-20")
-4. Use EXACT "exercise_name" field from results - copy the full name as-is
-5. If you've already searched 3+ times, STOP searching and create the plan NOW
+1. Do 1-2 exercise searches max (the 30 canonicals cover all common movements)
+2. Call create_plan_proposal with canonical_name for each exercise
+3. For EACH exercise: exercise_name (canonical), target_sets (3-5), target_reps (e.g., "8-12")
+4. Common canonicals: bench_press, squat, deadlift, row, overhead_press, pullup, lat_pulldown, bicep_curl, tricep_extension, lunge, leg_press, leg_curl, hip_thrust, calf_raise, plank
 
-CRITICAL: 
-- After 3-4 searches, you MUST call create_plan_proposal. Never search more than 4 times.
-- ALWAYS include target_reps for every exercise (strength: "5-8", hypertrophy: "8-12", endurance: "12-15")
+CANONICAL NAMES (use these exact names):
+- Chest: bench_press, incline_press, chest_fly, dip
+- Back: deadlift, row, pullup, lat_pulldown, cable_row
+- Shoulders: overhead_press, lateral_raise, face_pull
+- Arms: bicep_curl, hammer_curl, tricep_extension, close_grip_press
+- Legs: squat, front_squat, leg_press, lunge, leg_extension, romanian_deadlift, leg_curl, hip_thrust, calf_raise
+- Core: plank, crunch, russian_twist, hanging_leg_raise
 
-EXERCISE NAMING - Use EXACT names from search results:
-- "Barbell Conventional Deadlift" (not "Barbell Deadlift")
-- "Barbell Bench Press" (correct)
-- "Double Dumbbell Romanian Deadlift" (not "Romanian Deadlift")
+ALWAYS include target_reps: strength "5-8", hypertrophy "8-12", endurance "12-15"
 
 Current Date: ${format(new Date(), 'yyyy-MM-dd')}
 `;
@@ -916,12 +932,32 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                     onPress: async () => {
                         try {
                             setLoading(true);
+                            
+                            // Map canonical names to actual exercises (async)
+                            const mappedProposal = await mapProposalExercisesAsync(proposal);
+                            
+                            if (!mappedProposal) {
+                                showDialog("Error", "Failed to map exercises. Please try again.");
+                                return;
+                            }
+                            
+                            // Validate we have exercises mapped
+                            const totalExercises = mappedProposal.days.reduce(
+                                (sum: number, day: any) => sum + (day.exercises?.length || 0), 0
+                            );
+                            
+                            if (totalExercises === 0) {
+                                showDialog("Error", "No exercises could be mapped. Please ask the AI to generate a new plan.");
+                                return;
+                            }
+                            
                             // We ALWAYS use createPlan for AI proposals now.
                             // plannerService.createPlan automatically deactivates the old plan.
-                            await plannerService.createPlan(user.id, proposal);
+                            await plannerService.createPlan(user.id, mappedProposal, 'ai_update');
 
                             showDialog("Success", isUpdate ? "New version created and activated!" : "New plan created and activated!");
                             loadContext(); // Refresh context
+                            refreshPlan(); // Notify global context so dashboard updates
                         } catch (e: any) {
                             console.error("Error applying proposal:", e);
                             showDialog("Error", `Failed to apply changes: ${e.message || 'Unknown error'}`);

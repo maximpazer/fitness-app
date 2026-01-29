@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { memo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { SetRow } from './SetRow';
 
@@ -8,6 +8,7 @@ interface ExerciseCardProps {
     isExpanded: boolean;
     historySets?: any[];
     activeFieldId?: string;
+    localInputValue?: string;
     onFocusField: (setIdx: number, field: 'weight' | 'reps') => void;
     onCompleteSet: (setIdx: number) => void;
     onAddSet: () => void;
@@ -18,11 +19,12 @@ interface ExerciseCardProps {
 }
 
 
-export const ExerciseCard: React.FC<ExerciseCardProps> = ({
+const ExerciseCardComponent: React.FC<ExerciseCardProps> = ({
     exercise,
     isExpanded,
     historySets,
     activeFieldId,
+    localInputValue,
     onFocusField,
     onCompleteSet,
     onAddSet,
@@ -47,20 +49,20 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
     }, 0);
 
     return (
-        <View className={`bg-gray-950 mb-4 rounded-3xl overflow-hidden border ${isExpanded ? 'border-gray-800' : 'border-gray-800/50'}`}>
+        <View className={`bg-gray-800 mb-4 rounded-2xl overflow-hidden border ${isExpanded ? 'border-blue-500/30' : 'border-gray-700'} shadow-lg`}>
 
             {/* Header - Always Visible / Toggleable */}
             <TouchableOpacity
                 activeOpacity={0.8}
                 onPress={onToggleExpand}
-                className={`p-4 flex-row justify-between items-center ${isExpanded ? 'border-b border-gray-800 bg-gray-900/50' : 'bg-gray-900/20'}`}
+                className={`p-4 flex-row justify-between items-center ${isExpanded ? 'border-b border-gray-700 bg-gray-750' : 'bg-gray-800'}`}
             >
                 <View className="flex-1 mr-2">
                     <Text className="font-bold text-lg leading-tight text-white" numberOfLines={2}>
                         {exercise.name}
                     </Text>
-                    <Text className="text-gray-500 text-[10px] font-semibold mt-1 uppercase tracking-tight">
-                        <Text className="text-blue-500/80">{exercise.category || exercise.target_muscle || 'Target'}</Text> · {completedSets}/{totalSets} sets · {totalReps} reps {isExpanded ? `· Best: ${maxWeight > 0 ? maxWeight + 'kg' : '-'}` : ''}
+                    <Text className="text-gray-400 text-[11px] font-semibold mt-1 uppercase tracking-tight">
+                        <Text className="text-blue-400">{exercise.category || exercise.target_muscle || 'Target'}</Text> · {completedSets}/{totalSets} sets · {totalReps} reps {isExpanded ? `· Best: ${maxWeight > 0 ? maxWeight + 'kg' : '-'}` : ''}
                     </Text>
                 </View>
 
@@ -72,8 +74,8 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
                     )}
                     {/* Info Button - Only show when expanded or always? User wants to access it. Let's keep it accessible. */}
                     {isExpanded && (
-                        <TouchableOpacity onPress={(e) => { e.stopPropagation(); onShowInfo(); }} className="p-2 bg-gray-800 rounded-full">
-                            <Ionicons name="information-circle-outline" size={20} color="#6b7280" />
+                        <TouchableOpacity onPress={(e) => { e.stopPropagation(); onShowInfo(); }} className="p-2 bg-gray-700 rounded-full">
+                            <Ionicons name="information-circle-outline" size={20} color="#9ca3af" />
                         </TouchableOpacity>
                     )}
 
@@ -88,13 +90,13 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
             {isExpanded && (
                 <>
                     {/* Column Headers */}
-                    <View className="flex-row px-4 py-2 bg-gray-900/30">
-                        <Text className="w-10 text-center text-gray-500 text-[10px] font-bold uppercase">Set</Text>
+                    <View className="flex-row px-4 py-3 bg-gray-700/50">
+                        <Text className="w-10 text-center text-gray-400 text-[10px] font-bold uppercase">Set</Text>
                         <View className="flex-1 flex-row gap-4 px-2">
-                            <Text className="flex-1 text-center text-gray-500 text-[10px] font-bold uppercase">Weight</Text>
-                            <Text className="flex-1 text-center text-gray-500 text-[10px] font-bold uppercase">Reps</Text>
+                            <Text className="flex-1 text-center text-gray-400 text-[10px] font-bold uppercase">Weight</Text>
+                            <Text className="flex-1 text-center text-gray-400 text-[10px] font-bold uppercase">Reps</Text>
                         </View>
-                        <Text className="w-12 text-center text-gray-500 text-[10px] font-bold uppercase">Done</Text>
+                        <Text className="w-12 text-center text-gray-400 text-[10px] font-bold uppercase">Done</Text>
                     </View>
 
                     {/* Sets List */}
@@ -108,8 +110,8 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
                                 <View key={idx}>
                                     <SetRow
                                         setNumber={set.setNumber}
-                                        weight={set.weight}
-                                        reps={set.reps}
+                                        weight={isWeightActive && localInputValue !== undefined ? localInputValue : set.weight}
+                                        reps={isRepsActive && localInputValue !== undefined ? localInputValue : set.reps}
                                         prevWeight={prevSet?.weight_kg?.toString()}
                                         prevReps={prevSet?.reps?.toString()}
                                         isCompleted={set.completed}
@@ -138,3 +140,6 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
         </View>
     );
 };
+
+// Memoize to prevent unnecessary re-renders during input
+export const ExerciseCard = memo(ExerciseCardComponent);

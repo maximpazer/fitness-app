@@ -158,31 +158,22 @@ export const AI_TOOLS = {
         },
         {
             name: 'search_exercises',
-            description: 'Search the exercise database to find valid exercises for plan creation. MUST use this before creating plans to get correct exercise names. Returns exercise IDs and names. Prioritizes popular/compound exercises.',
+            description: 'Search for canonical exercises to use in plan creation. Returns a curated list of standard exercises (bench press, squat, deadlift, etc). Use the canonical_name in create_plan_proposal - the system will automatically select the best variant based on user equipment.',
             parameters: {
                 type: 'object',
                 properties: {
                     query: {
                         type: 'string',
-                        description: 'Search term for exercise name (e.g., "push up", "squat", "row", "press")',
+                        description: 'Search term (e.g., "press", "squat", "pull", "curl")',
                     },
-                    category: {
+                    muscle: {
                         type: 'string',
-                        enum: ['chest', 'back', 'shoulders', 'arms', 'legs', 'core', 'cardio', 'full_body'],
-                        description: 'Filter by body category',
+                        description: 'Target muscle (e.g., "Chest", "Back", "Quadriceps", "Shoulders")',
                     },
-                    equipment: {
+                    movement_pattern: {
                         type: 'string',
-                        enum: ['Bodyweight', 'Barbell', 'Dumbbell', 'Kettlebell', 'Cable', 'Machine', 'Resistance Band'],
-                        description: 'Filter by equipment. Use "Bodyweight" for calisthenics/no-equipment exercises.',
-                    },
-                    muscle_group: {
-                        type: 'string',
-                        description: 'Target muscle (e.g., "Chest", "Lats", "Quadriceps", "Biceps", "Glutes")',
-                    },
-                    limit: {
-                        type: 'number',
-                        description: 'Max results (default: 15, max: 30). Use higher for more variety.',
+                        enum: ['push', 'pull', 'hinge', 'squat', 'lunge', 'isolation'],
+                        description: 'Movement pattern filter',
                     },
                 },
                 required: [],
@@ -220,7 +211,7 @@ export const AI_TOOLS = {
                                     items: {
                                         type: 'object',
                                         properties: {
-                                            exercise_name: { type: 'string', description: 'EXACT name from search_exercises' },
+                                            exercise_name: { type: 'string', description: 'canonical_name from search_exercises (e.g., "bench_press", "squat")' },
                                             target_sets: { type: 'number', description: 'Number of sets (typically 3-5)' },
                                             target_reps: { type: 'string', description: 'Rep range (e.g., "8-12", "5", "12-15")' },
                                             rest_seconds: { type: 'number', description: 'Rest between sets in seconds' },
@@ -857,152 +848,79 @@ export const aiToolsService = {
     },
 
     /**
-     * Search exercises - for plan creation
-     * Returns exercises that match the criteria with their IDs
-     * Prioritizes common/popular exercises
+     * Search canonical exercises - for plan creation
+     * Returns curated list of 30 standard exercises
+     * AI selects canonical names, backend picks best variant for user
      */
     async searchExercises(args: {
         query?: string;
-        category?: string;
-        equipment?: string;
-        muscle_group?: string;
-        limit?: number;
+        muscle?: string;
+        movement_pattern?: string;
     }) {
-        const { query, category, equipment, muscle_group, limit = 15 } = args;
-        const maxLimit = Math.min(limit, 30);
+        const { query, muscle, movement_pattern } = args;
 
-        // Define popular/common exercises to prioritize
-        const popularExercises = [
-            'bench press', 'squat', 'deadlift', 'pull up', 'push up', 'row',
-            'overhead press', 'lunge', 'plank', 'curl', 'tricep', 'dip',
-            'lat pulldown', 'leg press', 'shoulder press', 'chest fly',
-            'romanian deadlift', 'hip thrust', 'cable', 'face pull'
-        ];
-
+        // Query canonical exercises (30 total, not 3200+)
         let dbQuery = supabase
-            .from('exercises')
-            .select('id, name, category, muscle_groups, equipment_needed, difficulty, is_compound, classification, mechanics')
-            .order('name');
+            .from('canonical_exercises')
+            .select('canonical_name, display_name, movement_pattern, primary_muscle, secondary_muscles, equipment_category')
+            .eq('is_active', true)
+            .order('sort_order');
 
-        // Filter by category
-        if (category) {
-            dbQuery = dbQuery.eq('category', category);
+        // Filter by movement pattern
+        if (movement_pattern) {
+            dbQuery = dbQuery.eq('movement_pattern', movement_pattern);
         }
 
-        // Filter by muscle group (using contains for array)
-        if (muscle_group) {
-            dbQuery = dbQuery.contains('muscle_groups', [muscle_group]);
+        // Filter by muscle
+        if (muscle) {
+            dbQuery = dbQuery.ilike('primary_muscle', `%${muscle}%`);
         }
 
-        // Search by name (if query provided)
+        // Search by name
         if (query) {
-            dbQuery = dbQuery.ilike('name', `%${query}%`);
+            dbQuery = dbQuery.or(`canonical_name.ilike.%${query}%,display_name.ilike.%${query}%`);
         }
 
-        // Filter by equipment using contains
-        if (equipment) {
-            const equipmentMap: Record<string, string> = {
-                'bodyweight': 'Bodyweight',
-                'barbell': 'Barbell',
-                'dumbbell': 'Dumbbell',
-                'kettlebell': 'Kettlebell',
-                'cable': 'Cable',
-                'machine': 'Machine',
-                'resistance_band': 'Resistance Band',
-                'miniband': 'Miniband',
-            };
-            const mappedEquip = equipmentMap[equipment.toLowerCase()] || equipment;
-            dbQuery = dbQuery.contains('equipment_needed', [mappedEquip]);
-        }
-
-        // Get more results to allow for sorting/prioritization
-        const { data: exercises, error } = await dbQuery.limit(200);
+        const { data: canonicals, error } = await dbQuery;
 
         if (error) {
             console.error('[searchExercises] Error:', error);
             return { error: 'Failed to search exercises', details: error.message };
         }
 
-        if (!exercises || exercises.length === 0) {
-            // Try a broader search without equipment filter
-            if (equipment && query) {
-                const { data: fallback } = await supabase
-                    .from('exercises')
-                    .select('id, name, category, muscle_groups, equipment_needed, difficulty, is_compound')
-                    .ilike('name', `%${query}%`)
-                    .limit(50);
-                
-                if (fallback && fallback.length > 0) {
-                    const results = fallback.slice(0, maxLimit).map((ex: any) => ({
-                        id: ex.id,
-                        name: ex.name,
-                        category: ex.category,
-                        muscles: (ex.muscle_groups || []).slice(0, 3).join(', '),
-                        equipment: (ex.equipment_needed || []).join(', ') || 'None',
-                    }));
-                    return {
-                        query: args,
-                        count: results.length,
-                        results,
-                        note: `No exact equipment match. Showing ${query} exercises with any equipment.`,
-                    };
-                }
-            }
+        if (!canonicals || canonicals.length === 0) {
+            // Return all canonicals if no matches
+            const { data: allCanonicals } = await supabase
+                .from('canonical_exercises')
+                .select('canonical_name, display_name, movement_pattern, primary_muscle, equipment_category')
+                .eq('is_active', true)
+                .order('sort_order');
             
-            return { 
-                query: args, 
-                results: [],
-                message: 'No exercises found. Try: query="push up" or equipment="bodyweight" or category="chest"' 
+            return {
+                query: args,
+                results: (allCanonicals || []).map((c: any) => ({
+                    canonical_name: c.canonical_name,
+                    display_name: c.display_name,
+                    movement: c.movement_pattern,
+                    muscle: c.primary_muscle,
+                })),
+                message: 'No exact match. Showing all available exercises.',
             };
         }
 
-        // Score and sort exercises - prioritize popular/common ones
-        const scored = exercises.map((ex: any) => {
-            let score = 0;
-            const nameLower = ex.name.toLowerCase();
-            
-            // Boost for popular exercises
-            for (const popular of popularExercises) {
-                if (nameLower.includes(popular)) {
-                    score += 10;
-                    break;
-                }
-            }
-            
-            // Boost for compound exercises
-            if (ex.is_compound) score += 5;
-            
-            // Boost for simpler names (less verbose = more common)
-            if (ex.name.split(' ').length <= 4) score += 3;
-            
-            // Boost for Bodybuilding classification (common exercises)
-            if (ex.classification === 'Bodybuilding') score += 2;
-            
-            return { ...ex, score };
-        });
-
-        // Sort by score (highest first), then alphabetically
-        scored.sort((a: any, b: any) => {
-            if (b.score !== a.score) return b.score - a.score;
-            return a.name.localeCompare(b.name);
-        });
-
-        // Return formatted results with clear naming
-        const results = scored.slice(0, maxLimit).map((ex: any) => ({
-            exercise_name: ex.name, // Use this EXACT name in create_plan_proposal
-            id: ex.id,
-            category: ex.category,
-            muscles: (ex.muscle_groups || []).slice(0, 3).join(', '),
-            equipment: (ex.equipment_needed || []).join(', ') || 'Bodyweight',
-            is_compound: ex.is_compound || false,
+        const results = canonicals.map((c: any) => ({
+            canonical_name: c.canonical_name,  // Use THIS in create_plan_proposal
+            display_name: c.display_name,
+            movement: c.movement_pattern,
+            muscle: c.primary_muscle,
+            secondary: (c.secondary_muscles || []).join(', '),
         }));
 
         return {
             query: args,
-            total_found: exercises.length,
-            returned: results.length,
+            count: results.length,
             results,
-            IMPORTANT: 'Copy the "exercise_name" field EXACTLY when using create_plan_proposal. Do NOT modify or simplify the names.',
+            IMPORTANT: 'Use "canonical_name" (e.g., "bench_press", "squat") in create_plan_proposal. The system will automatically select the best exercise variant based on user equipment.',
         };
     },
 

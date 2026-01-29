@@ -59,9 +59,19 @@ function RootLayoutNav() {
   );
 }
 
+import { PlanProvider } from '@/context/PlanContext';
 import { WorkoutProvider } from '@/context/WorkoutContext';
 import { DialogProvider } from '@/hooks/useConfirmDialog';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+
+function AppProviders({ children }: { children: React.ReactNode }) {
+  const { session } = useAuthContext();
+  return (
+    <PlanProvider userId={session?.user?.id || null}>
+      {children}
+    </PlanProvider>
+  );
+}
 
 export default function RootLayout() {
   return (
@@ -69,7 +79,9 @@ export default function RootLayout() {
       <AuthProvider>
         <WorkoutProvider>
           <DialogProvider>
-            <RootLayoutNav />
+            <AppProviders>
+              <RootLayoutNav />
+            </AppProviders>
           </DialogProvider>
         </WorkoutProvider>
       </AuthProvider>

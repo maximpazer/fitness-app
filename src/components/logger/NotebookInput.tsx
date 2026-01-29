@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,31 +26,50 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
     onClose
 }) => {
     const insets = useSafeAreaInsets();
+    
+    // Local state for instant display
+    const [displayValue, setDisplayValue] = useState(value);
+    
+    // Sync displayValue when value prop changes (field navigation)
+    useEffect(() => {
+        setDisplayValue(value);
+    }, [value]);
+    
     if (!visible) return null;
 
-    const handlePress = (key: string) => {
+    const handlePress = useCallback((key: string) => {
         Haptics.selectionAsync();
+        let newValue: string;
+        
         if (key === 'backspace') {
-            onChange(value.slice(0, -1));
+            newValue = displayValue.slice(0, -1);
         } else if (key === '.') {
-            if (!value.includes('.')) {
-                if (value === '') onChange('0.');
-                else onChange(value + '.');
+            if (!displayValue.includes('.')) {
+                newValue = displayValue === '' ? '0.' : displayValue + '.';
+            } else {
+                return; // Already has decimal
             }
         } else {
-            if (value.length < 8) {
-                onChange(value === '0' ? key : value + key);
+            if (displayValue.length < 8) {
+                newValue = displayValue === '0' ? key : displayValue + key;
+            } else {
+                return; // Max length
             }
         }
-    };
+        
+        setDisplayValue(newValue); // Instant UI update
+        onChange(newValue); // Notify parent
+    }, [displayValue, onChange]);
 
-    const adjust = (delta: number) => {
+    const adjust = useCallback((delta: number) => {
         Haptics.selectionAsync();
-        const num = parseFloat(value) || 0;
+        const num = parseFloat(displayValue) || 0;
         const next = Math.max(0, num + delta);
         const nextStr = next % 1 === 0 ? next.toString() : next.toFixed(1);
-        onChange(nextStr);
-    };
+        
+        setDisplayValue(nextStr); // Instant UI update
+        onChange(nextStr); // Notify parent
+    }, [displayValue, onChange]);
 
     const keys = [
         ['1', '2', '3'],
@@ -140,9 +159,9 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
-        backgroundColor: '#030712',
+        backgroundColor: '#1f2937',
         borderTopWidth: 1,
-        borderTopColor: '#1f2937',
+        borderTopColor: '#374151',
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
         shadowColor: '#000',
@@ -167,15 +186,15 @@ const styles = StyleSheet.create({
     keyButton: {
         flex: 1,
         height: 56,
-        backgroundColor: '#111827',
+        backgroundColor: '#374151',
         borderWidth: 1,
-        borderColor: '#1f2937',
+        borderColor: '#4b5563',
         borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
     },
     keyText: {
-        color: 'white',
+        color: '#f3f4f6',
         fontSize: 24,
         fontWeight: 'bold',
     },
@@ -195,31 +214,31 @@ const styles = StyleSheet.create({
         minHeight: 56,
     },
     stepper25: {
-        backgroundColor: 'rgba(202, 138, 4, 0.1)',
-        borderColor: 'rgba(202, 138, 4, 0.3)',
+        backgroundColor: 'rgba(234, 179, 8, 0.15)',
+        borderColor: 'rgba(234, 179, 8, 0.4)',
     },
     stepper25Text: {
-        color: '#ca8a04',
+        color: '#eab308',
         fontWeight: '900',
     },
     stepperBlue: {
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        borderColor: 'rgba(59, 130, 246, 0.3)',
+        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+        borderColor: 'rgba(59, 130, 246, 0.4)',
     },
     nextButtonContainer: {
         marginTop: 'auto',
     },
     navButton: {
-        backgroundColor: '#111827',
+        backgroundColor: '#374151',
         borderWidth: 1,
-        borderColor: '#1f2937',
+        borderColor: '#4b5563',
         borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
     },
     nextButton: {
-        backgroundColor: '#2563eb',
-        borderColor: '#3b82f6',
+        backgroundColor: '#3b82f6',
+        borderColor: '#60a5fa',
     },
     hideButton: {
         position: 'absolute',
@@ -228,9 +247,9 @@ const styles = StyleSheet.create({
         width: 32,
         height: 32,
         borderRadius: 16,
-        backgroundColor: '#111827',
+        backgroundColor: '#374151',
         borderWidth: 1,
-        borderColor: '#1f2937',
+        borderColor: '#4b5563',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 10,

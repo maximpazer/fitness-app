@@ -13,6 +13,11 @@ export type FullPlan = WorkoutPlan & {
     })[];
 };
 
+export type ArchivedPlan = WorkoutPlan & {
+    days_count?: number;
+    exercises_count?: number;
+};
+
 export interface CreatePlanDTO {
     name: string;
     description?: string;
@@ -105,18 +110,34 @@ export const plannerService = {
         return plan as any as FullPlan;
     },
 
-    async deactivateCurrentPlan(userId: string) {
-        await (supabase
+    async deactivateCurrentPlan(userId: string, archiveReason: 'ai_update' | 'user_archived' | 'replaced' = 'replaced') {
+        // Archive the current active plan instead of just deactivating
+        // First try with archive columns, fallback to just is_active if migration not run
+        const { error } = await (supabase
             .from('workout_plans')
-            .update({ is_active: false } as any)
+            .update({ 
+                is_active: false,
+                is_archived: true,
+                archived_at: new Date().toISOString(),
+                archive_reason: archiveReason
+            } as any)
             .eq('user_id', userId)
             .eq('is_active', true) as any);
+        
+        // If archive columns don't exist, just deactivate
+        if (error?.code === '42703') {
+            await (supabase
+                .from('workout_plans')
+                .update({ is_active: false } as any)
+                .eq('user_id', userId)
+                .eq('is_active', true) as any);
+        }
     },
 
-    async createPlan(userId: string, planData: CreatePlanDTO) {
+    async createPlan(userId: string, planData: CreatePlanDTO, archiveReason: 'ai_update' | 'user_archived' | 'replaced' = 'replaced') {
         // Start transaction (manual via sequential calls, Supabase JS doesn't support easy transactions yet)
-        // 1. Deactivate old plans
-        await this.deactivateCurrentPlan(userId);
+        // 1. Deactivate/archive old plans
+        await this.deactivateCurrentPlan(userId, archiveReason);
 
         // 2. Create Plan
         const { data: newPlan, error: planError } = await (supabase
@@ -354,5 +375,140 @@ export const plannerService = {
 
         if (error) throw error;
         return data;
+    },
+
+    /**
+     * Get all archived plans for a user
+     * Note: Requires migration 010_plan_archive.sql to be run
+     */
+    async getArchivedPlans(userId: string): Promise<ArchivedPlan[]> {
+        try {
+            const { data, error } = await supabase
+                .from('workout_plans')
+                .select(`
+                    *,
+                    days:plan_days (
+                        id,
+                        exercises:plan_exercises (id)
+                    )
+                `)
+                .eq('user_id', userId)
+                .eq('is_archived', true)
+                .order('archived_at', { ascending: false });
+
+            if (error) {
+                // Handle case where column doesn't exist yet (migration not run)
+                if (error.code === '42703') {
+                    console.warn('[Planner] Archive columns not found. Run migration 010_plan_archive.sql');
+                    return [];
+                }
+                console.error('Error fetching archived plans:', error);
+                return [];
+            }
+
+            // Calculate counts for summary display
+            return (data || []).map((plan: any) => ({
+                ...plan,
+                days_count: plan.days?.length || 0,
+                exercises_count: plan.days?.reduce((sum: number, day: any) => 
+                    sum + (day.exercises?.length || 0), 0) || 0,
+                days: undefined // Remove days array to keep response light
+            }));
+        } catch (e) {
+            console.warn('[Planner] getArchivedPlans failed:', e);
+            return [];
+        }
+    },
+
+    /**
+     * Archive the current active plan manually
+     */
+    async archivePlan(planId: string, reason: 'ai_update' | 'user_archived' | 'replaced' = 'user_archived') {
+        const { error } = await (supabase
+            .from('workout_plans')
+            .update({
+                is_active: false,
+                is_archived: true,
+                archived_at: new Date().toISOString(),
+                archive_reason: reason
+            } as any)
+            .eq('id', planId) as any);
+
+        if (error) throw error;
+    },
+
+    /**
+     * Restore an archived plan - makes it active and unarchives it
+     * Archives the currently active plan first
+     */
+    async restorePlan(userId: string, planId: string) {
+        // First archive the current active plan
+        await this.deactivateCurrentPlan(userId, 'replaced');
+
+        // Then restore the selected plan
+        const { error } = await (supabase
+            .from('workout_plans')
+            .update({
+                is_active: true,
+                is_archived: false,
+                archived_at: null,
+                archive_reason: null
+            } as any)
+            .eq('id', planId) as any);
+
+        if (error) throw error;
+    },
+
+    /**
+     * Permanently delete an archived plan
+     * Only works on archived plans to prevent accidental deletion of active plan
+     */
+    async deleteArchivedPlan(planId: string) {
+        // Verify plan is archived first
+        const { data: plan, error: checkError } = await supabase
+            .from('workout_plans')
+            .select('is_archived')
+            .eq('id', planId)
+            .single();
+
+        if (checkError || !plan) {
+            throw new Error('Plan not found');
+        }
+
+        if (!(plan as any).is_archived) {
+            throw new Error('Can only delete archived plans');
+        }
+
+        // Delete in order: plan_exercises -> plan_days -> workout_plan
+        const { data: days } = await supabase
+            .from('plan_days')
+            .select('id')
+            .eq('plan_id', planId);
+
+        if (days && days.length > 0) {
+            const dayIds = days.map((d: any) => d.id);
+            await supabase.from('plan_exercises').delete().in('plan_day_id', dayIds);
+            await supabase.from('plan_days').delete().eq('plan_id', planId);
+        }
+
+        const { error } = await supabase
+            .from('workout_plans')
+            .delete()
+            .eq('id', planId);
+
+        if (error) {
+            // If there are completed workouts referencing this plan, just mark it deleted
+            if (error.code === '23503') {
+                await (supabase
+                    .from('workout_plans')
+                    .update({ 
+                        name: `[Deleted] ${new Date().toISOString().split('T')[0]}`,
+                        is_archived: true
+                    } as any)
+                    .eq('id', planId) as any);
+                return;
+            }
+            throw error;
+        }
     }
 };

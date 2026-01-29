@@ -54,6 +54,9 @@ export interface WorkoutPlan {
     description?: string;
     duration_weeks: number;
     is_active: boolean;
+    is_archived?: boolean;
+    archived_at?: string;
+    archive_reason?: 'ai_update' | 'user_archived' | 'replaced' | 'legacy_deactivated';
     started_at?: string;
     created_at: string;
 }

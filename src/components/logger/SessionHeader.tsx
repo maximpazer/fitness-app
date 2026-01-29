@@ -26,10 +26,10 @@ export const SessionHeader: React.FC<SessionHeaderProps> = ({
     };
 
     return (
-        <View style={{ paddingTop: insets.top }} className="bg-gray-950 border-b border-gray-800">
+        <View style={{ paddingTop: insets.top }} className="bg-gray-800 border-b border-gray-700">
             {/* Drag Handle Area (Visual only, pan gesture handles logic) */}
             <View className="items-center py-2">
-                <View className="w-12 h-1.5 bg-gray-800 rounded-full" />
+                <View className="w-12 h-1.5 bg-gray-600 rounded-full" />
             </View>
 
             <View className="px-4 pb-3 flex-row justify-between items-center">
@@ -37,10 +37,10 @@ export const SessionHeader: React.FC<SessionHeaderProps> = ({
                 <View className="flex-row items-center flex-1 mr-4">
                     <TouchableOpacity
                         onPress={onExit}
-                        className="w-10 h-10 items-center justify-center -ml-2 rounded-full active:bg-gray-800/50"
+                        className="w-10 h-10 items-center justify-center -ml-2 rounded-full bg-gray-700/50 active:bg-gray-700"
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                        <Ionicons name="close" size={28} color="#9ca3af" />
+                        <Ionicons name="close" size={28} color="#d1d5db" />
                     </TouchableOpacity>
                     <View className="flex-1 px-2">
                         <Text className="text-white font-bold text-lg leading-tight" numberOfLines={1}>
@@ -54,11 +54,11 @@ export const SessionHeader: React.FC<SessionHeaderProps> = ({
 
                 {/* Right: Stats & Actions */}
                 <View className="flex-row items-center">
-                    <View className="items-end">
+                    <View className="items-end bg-gray-700/30 px-3 py-2 rounded-xl">
                         <Text className="text-white font-mono text-xl font-black tracking-tight">
                             {formatTime(durationSeconds)}
                         </Text>
-                        <Text className="text-gray-500 text-[10px] font-bold uppercase tracking-widest">
+                        <Text className="text-gray-400 text-[10px] font-bold uppercase tracking-widest">
                             {volumeKg.toLocaleString()} kg
                         </Text>
                     </View>

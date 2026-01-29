@@ -1,4 +1,5 @@
 import { useAuthContext } from '@/context/AuthContext';
+import { usePlan } from '@/context/PlanContext';
 import { useWorkout } from '@/context/WorkoutContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { supabase } from '@/lib/supabase';
@@ -18,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function Dashboard() {
   const { user } = useAuthContext();
+  const { planVersion } = usePlan(); // Subscribe to plan changes
   const { initWorkout, setOnWorkoutComplete } = useWorkout();
   const { showDialog } = useConfirmDialog();
   const [loading, setLoading] = useState(true);
@@ -56,7 +58,18 @@ export default function Dashboard() {
       // Load active plan and today's workout
       const plan = await plannerService.getActivePlan(user.id);
       setActivePlan(plan);
-      if (plan && plan.days && plan.days.length > 0) {
+      
+      if (!plan || !plan.days || plan.days.length === 0) {
+        // No active plan - clear all workout-related state
+        setTodayWorkout(null);
+        setYesterdayWorkout(null);
+        setTomorrowWorkout(null);
+        setTodayWorkoutCompleted(false);
+        setCompletedWorkoutDetails(null);
+        setPlanExercises([]);
+        setSelectedExercises([]);
+        setExerciseProgressData(new Map());
+      } else {
         // Extract unique exercises from all training days
         const uniqueExercises = new Map<string, any>();
         plan.days.forEach((day: any) => {
@@ -111,15 +124,17 @@ export default function Dashboard() {
 
         if (lastCompleted) {
           setYesterdayWorkout(plan.days.find(d => d.id === (lastCompleted as any).plan_day_id));
-        } else {
+        } else if (workout) {
           // Fallback to previous day in plan
           const currentTrainingIdx = plan.days.findIndex(d => d.id === workout.id);
           setYesterdayWorkout(plan.days[(currentTrainingIdx - 1 + plan.days.length) % plan.days.length]);
         }
 
         // Find tomorrow's workout (next training day in adjusted sequence)
-        const sequence = planProgressionService.getUpcomingSequence(plan, workout.id, 1);
-        setTomorrowWorkout(sequence[0] || plan.days.find(d => !d.day_type || d.day_type === 'training'));
+        if (workout) {
+          const sequence = planProgressionService.getUpcomingSequence(plan, workout.id, 1);
+          setTomorrowWorkout(sequence[0] || plan.days.find(d => !d.day_type || d.day_type === 'training'));
+        }
 
         // Check if today's workout is completed
         if (workout) {
@@ -163,7 +178,7 @@ export default function Dashboard() {
           .gte('completed_at', date.toISOString())
           .lt('completed_at', nextDay.toISOString());
 
-        last7DaysData.push(dayWorkouts && dayWorkouts.length > 0);
+        last7DaysData.push(!!(dayWorkouts && dayWorkouts.length > 0));
       }
       setLast7Days(last7DaysData);
 
@@ -191,7 +206,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadData();
-  }, [loadData, manuallySelectedDayId]);
+  }, [loadData, manuallySelectedDayId, planVersion]); // Reload when plan changes
 
   // Set callback to refresh dashboard when workout completes
   useEffect(() => {
