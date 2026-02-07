@@ -4,6 +4,7 @@ import { profileService } from '@/services/profile.service';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 
+import { GoalsSection } from '@/components/profile/GoalsSection';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import {
     ActivityIndicator,
@@ -101,6 +102,10 @@ export default function ProfileScreen() {
         );
     };
 
+    const handleManagePreferences = () => {
+        router.push('/onboarding');
+    };
+
     if (authLoading) {
         return (
             <View className="flex-1 justify-center items-center bg-gray-950">
@@ -115,127 +120,271 @@ export default function ProfileScreen() {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 className="flex-1"
             >
-                <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                    <ScrollView className="flex-1 px-6">
-                        <View className="py-6">
-                            {/* Header */}
-                            <View className="flex-row items-center mb-8">
-                                <View className="w-16 h-16 bg-blue-600 rounded-full items-center justify-center mr-4">
-                                    <Text className="text-white text-3xl font-bold">
-                                        {displayName ? displayName[0].toUpperCase() : 'U'}
-                                    </Text>
-                                </View>
-                                <View>
-                                    <Text className="text-2xl font-bold text-white">Settings</Text>
-                                    <Text className="text-gray-400">Manage your account</Text>
-                                </View>
-                            </View>
-
-                            {/* Personal Info Section */}
-                            <View className="mb-8">
-                                <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Personal Information</Text>
-
-                                <View className="bg-gray-900 rounded-2xl p-4 border border-gray-800 space-y-4">
-                                    <View>
-                                        <Text className="text-gray-500 mb-1 text-xs">Full Name</Text>
-                                        <TextInput
-                                            className="text-white text-base py-1"
-                                            placeholder="Enter your name"
-                                            placeholderTextColor="#4b5563"
-                                            value={displayName}
-                                            onChangeText={setDisplayName}
-                                        />
+                {Platform.OS === 'web' ? (
+                    <View className="flex-1">
+                        <ScrollView className="flex-1 px-6">
+                            <View className="py-6">
+                                {/* Header */}
+                                <View className="flex-row items-center mb-8">
+                                    <View className="w-16 h-16 bg-blue-600 rounded-full items-center justify-center mr-4">
+                                        <Text className="text-white text-3xl font-bold">
+                                            {displayName ? displayName[0].toUpperCase() : 'U'}
+                                        </Text>
                                     </View>
-
-                                    <View className="h-[1px] bg-gray-800" />
-
                                     <View>
-                                        <Text className="text-gray-500 mb-1 text-xs">Email Address</Text>
-                                        <TextInput
-                                            className="text-white text-base py-1"
-                                            placeholder="Enter your email"
-                                            placeholderTextColor="#4b5563"
-                                            value={email}
-                                            onChangeText={setEmail}
-                                            keyboardType="email-address"
-                                            autoCapitalize="none"
-                                        />
-                                    </View>
-
-                                    <View className="h-[1px] bg-gray-800" />
-
-                                    <View>
-                                        <Text className="text-gray-500 mb-1 text-xs">Birthday (YYYY-MM-DD)</Text>
-                                        <TextInput
-                                            className="text-white text-base py-1"
-                                            placeholder="1990-01-01"
-                                            placeholderTextColor="#4b5563"
-                                            value={birthDate}
-                                            onChangeText={setBirthDate}
-                                        />
+                                        <Text className="text-2xl font-bold text-white">Settings</Text>
+                                        <Text className="text-gray-400">Manage your account</Text>
                                     </View>
                                 </View>
-                            </View>
 
-                            {/* Security Section */}
-                            <View className="mb-8">
-                                <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Security</Text>
+                                {/* Goals Section */}
+                                <GoalsSection />
 
-                                <View className="bg-gray-900 rounded-2xl p-4 border border-gray-800 space-y-4">
-                                    <View>
-                                        <Text className="text-gray-500 mb-1 text-xs">New Password</Text>
-                                        <TextInput
-                                            className="text-white text-base py-1"
-                                            placeholder="••••••••"
-                                            placeholderTextColor="#4b5563"
-                                            secureTextEntry
-                                            value={newPassword}
-                                            onChangeText={setNewPassword}
-                                        />
-                                    </View>
+                                {/* Personal Info Section */}
+                                <View className="mb-8">
+                                    <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Personal Information</Text>
 
-                                    <View className="h-[1px] bg-gray-800" />
+                                    <View className="bg-gray-900 rounded-2xl p-4 border border-gray-800 space-y-4">
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">Full Name</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="Enter your name"
+                                                placeholderTextColor="#4b5563"
+                                                value={displayName}
+                                                onChangeText={setDisplayName}
+                                            />
+                                        </View>
 
-                                    <View>
-                                        <Text className="text-gray-500 mb-1 text-xs">Confirm New Password</Text>
-                                        <TextInput
-                                            className="text-white text-base py-1"
-                                            placeholder="••••••••"
-                                            placeholderTextColor="#4b5563"
-                                            secureTextEntry
-                                            value={confirmPassword}
-                                            onChangeText={setConfirmPassword}
-                                        />
+                                        <View className="h-[1px] bg-gray-800" />
+
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">Email Address</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="Enter your email"
+                                                placeholderTextColor="#4b5563"
+                                                value={email}
+                                                onChangeText={setEmail}
+                                                keyboardType="email-address"
+                                                autoCapitalize="none"
+                                            />
+                                        </View>
+
+                                        <View className="h-[1px] bg-gray-800" />
+
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">Birthday (YYYY-MM-DD)</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="1990-01-01"
+                                                placeholderTextColor="#4b5563"
+                                                value={birthDate}
+                                                onChangeText={setBirthDate}
+                                            />
+                                        </View>
                                     </View>
                                 </View>
+
+                                {/* Security Section */}
+                                <View className="mb-8">
+                                    <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Security</Text>
+
+                                    <View className="bg-gray-900 rounded-2xl p-4 border border-gray-800 space-y-4">
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">New Password</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="••••••••"
+                                                placeholderTextColor="#4b5563"
+                                                secureTextEntry
+                                                value={newPassword}
+                                                onChangeText={setNewPassword}
+                                            />
+                                        </View>
+
+                                        <View className="h-[1px] bg-gray-800" />
+
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">Confirm New Password</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="••••••••"
+                                                placeholderTextColor="#4b5563"
+                                                secureTextEntry
+                                                value={confirmPassword}
+                                                onChangeText={setConfirmPassword}
+                                            />
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Action Buttons */}
+                                <TouchableOpacity
+                                    className="bg-blue-600 py-4 rounded-2xl mb-4 shadow-lg shadow-blue-500/20"
+                                    onPress={handleUpdateProfile}
+                                    disabled={loading}
+                                >
+                                    {loading ? (
+                                        <ActivityIndicator color="white" />
+                                    ) : (
+                                        <Text className="text-white text-center font-bold text-lg">Save Changes</Text>
+                                    )}
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    className="bg-gray-900 py-4 rounded-2xl border border-red-500/50"
+                                    onPress={handleLogout}
+                                >
+                                    <Text className="text-red-500 text-center font-bold text-lg">Logout</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    className="mt-4 bg-gray-900 py-4 rounded-2xl border border-blue-500/40"
+                                    onPress={handleManagePreferences}
+                                >
+                                    <Text className="text-blue-300 text-center font-bold text-lg">Manage Preferences</Text>
+                                </TouchableOpacity>
+
+                                <View className="mt-8 items-center">
+                                    <Text className="text-gray-600 text-xs">GymGenius AI v1.0.0</Text>
+                                </View>
                             </View>
+                        </ScrollView>
+                    </View>
+                ) : (
+                    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                        <ScrollView className="flex-1 px-6">
+                            <View className="py-6">
+                                {/* Header */}
+                                <View className="flex-row items-center mb-8">
+                                    <View className="w-16 h-16 bg-blue-600 rounded-full items-center justify-center mr-4">
+                                        <Text className="text-white text-3xl font-bold">
+                                            {displayName ? displayName[0].toUpperCase() : 'U'}
+                                        </Text>
+                                    </View>
+                                    <View>
+                                        <Text className="text-2xl font-bold text-white">Settings</Text>
+                                        <Text className="text-gray-400">Manage your account</Text>
+                                    </View>
+                                </View>
 
-                            {/* Action Buttons */}
-                            <TouchableOpacity
-                                className="bg-blue-600 py-4 rounded-2xl mb-4 shadow-lg shadow-blue-500/20"
-                                onPress={handleUpdateProfile}
-                                disabled={loading}
-                            >
-                                {loading ? (
-                                    <ActivityIndicator color="white" />
-                                ) : (
-                                    <Text className="text-white text-center font-bold text-lg">Save Changes</Text>
-                                )}
-                            </TouchableOpacity>
+                                {/* Goals Section */}
+                                <GoalsSection />
 
-                            <TouchableOpacity
-                                className="bg-gray-900 py-4 rounded-2xl border border-red-500/50"
-                                onPress={handleLogout}
-                            >
-                                <Text className="text-red-500 text-center font-bold text-lg">Logout</Text>
-                            </TouchableOpacity>
+                                {/* Personal Info Section */}
+                                <View className="mb-8">
+                                    <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Personal Information</Text>
 
-                            <View className="mt-8 items-center">
-                                <Text className="text-gray-600 text-xs">GymGenius AI v1.0.0</Text>
+                                    <View className="bg-gray-900 rounded-2xl p-4 border border-gray-800 space-y-4">
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">Full Name</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="Enter your name"
+                                                placeholderTextColor="#4b5563"
+                                                value={displayName}
+                                                onChangeText={setDisplayName}
+                                            />
+                                        </View>
+
+                                        <View className="h-[1px] bg-gray-800" />
+
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">Email Address</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="Enter your email"
+                                                placeholderTextColor="#4b5563"
+                                                value={email}
+                                                onChangeText={setEmail}
+                                                keyboardType="email-address"
+                                                autoCapitalize="none"
+                                            />
+                                        </View>
+
+                                        <View className="h-[1px] bg-gray-800" />
+
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">Birthday (YYYY-MM-DD)</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="1990-01-01"
+                                                placeholderTextColor="#4b5563"
+                                                value={birthDate}
+                                                onChangeText={setBirthDate}
+                                            />
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Security Section */}
+                                <View className="mb-8">
+                                    <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Security</Text>
+
+                                    <View className="bg-gray-900 rounded-2xl p-4 border border-gray-800 space-y-4">
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">New Password</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="••••••••"
+                                                placeholderTextColor="#4b5563"
+                                                secureTextEntry
+                                                value={newPassword}
+                                                onChangeText={setNewPassword}
+                                            />
+                                        </View>
+
+                                        <View className="h-[1px] bg-gray-800" />
+
+                                        <View>
+                                            <Text className="text-gray-500 mb-1 text-xs">Confirm New Password</Text>
+                                            <TextInput
+                                                className="text-white text-base py-1"
+                                                placeholder="••••••••"
+                                                placeholderTextColor="#4b5563"
+                                                secureTextEntry
+                                                value={confirmPassword}
+                                                onChangeText={setConfirmPassword}
+                                            />
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Action Buttons */}
+                                <TouchableOpacity
+                                    className="bg-blue-600 py-4 rounded-2xl mb-4 shadow-lg shadow-blue-500/20"
+                                    onPress={handleUpdateProfile}
+                                    disabled={loading}
+                                >
+                                    {loading ? (
+                                        <ActivityIndicator color="white" />
+                                    ) : (
+                                        <Text className="text-white text-center font-bold text-lg">Save Changes</Text>
+                                    )}
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    className="bg-gray-900 py-4 rounded-2xl border border-red-500/50"
+                                    onPress={handleLogout}
+                                >
+                                    <Text className="text-red-500 text-center font-bold text-lg">Logout</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    className="mt-4 bg-gray-900 py-4 rounded-2xl border border-blue-500/40"
+                                    onPress={handleManagePreferences}
+                                >
+                                    <Text className="text-blue-300 text-center font-bold text-lg">Manage Preferences</Text>
+                                </TouchableOpacity>
+
+                                <View className="mt-8 items-center">
+                                    <Text className="text-gray-600 text-xs">GymGenius AI v1.0.0</Text>
+                                </View>
                             </View>
-                        </View>
-                    </ScrollView>
-                </TouchableWithoutFeedback>
+                        </ScrollView>
+                    </TouchableWithoutFeedback>
+                )}
             </KeyboardAvoidingView>
         </SafeAreaView>
     );

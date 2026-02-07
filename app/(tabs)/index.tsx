@@ -1,3 +1,4 @@
+import { WeightInputModal } from '@/components/WeightInputModal';
 import { useAuthContext } from '@/context/AuthContext';
 import { usePlan } from '@/context/PlanContext';
 import { useWorkout } from '@/context/WorkoutContext';
@@ -46,6 +47,21 @@ export default function Dashboard() {
   const [deletingWorkoutId, setDeletingWorkoutId] = useState<string | null>(null);
   const [last7Days, setLast7Days] = useState<boolean[]>([]);
   const router = useRouter();
+
+  // --- Weight Chart Filtering State ---
+  const [weightRange, setWeightRange] = useState<'2m' | '6m' | '1y' | 'all'>('2m');
+
+  // Helper to filter weightData by range
+  const getFilteredWeightData = () => {
+    if (!weightData) return [];
+    const now = new Date();
+    let cutoff: Date | null = null;
+    if (weightRange === '2m') cutoff = new Date(now.getFullYear(), now.getMonth() - 2, now.getDate());
+    else if (weightRange === '6m') cutoff = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+    else if (weightRange === '1y') cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    if (!cutoff) return weightData;
+    return weightData.filter((d: any) => new Date(d.date) >= cutoff);
+  };
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -324,6 +340,8 @@ export default function Dashboard() {
     }
   };
 
+  const [showWeightInput, setShowWeightInput] = useState(false);
+
   if (loading) {
     return (
       <View className="flex-1 justify-center items-center bg-gray-950">
@@ -543,41 +561,68 @@ export default function Dashboard() {
           {chartData && (
             <>
               <Text className="text-lg font-bold text-white mb-4">Weight Progress</Text>
+              <View className="flex-row mb-2 gap-2">
+                {['2m', '6m', '1y', 'all'].map((range) => (
+                  <TouchableOpacity
+                    key={range}
+                    className={`px-3 py-1 rounded-full border ${weightRange === range ? 'bg-blue-600 border-blue-500' : 'bg-gray-800 border-gray-700'}`}
+                    onPress={() => setWeightRange(range as any)}
+                  >
+                    <Text className={`text-xs font-bold ${weightRange === range ? 'text-white' : 'text-gray-400'}`}>{
+                      range === '2m' ? '2M' : range === '6m' ? '6M' : range === '1y' ? '1Y' : 'ALL'
+                    }</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <View className="bg-gray-900 rounded-3xl p-4 mb-6 border border-gray-800">
-                <LineChart
-                  data={chartData}
-                  width={Dimensions.get('window').width - 64}
-                  height={220}
-                  fromZero={false}
-                  withHorizontalLines={true}
-                  withVerticalLines={false}
-                  withInnerLines={true}
-                  chartConfig={{
-                    backgroundColor: '#1f2937',
-                    backgroundGradientFrom: '#1f2937',
-                    backgroundGradientTo: '#1f2937',
-                    decimalPlaces: 1,
-                    color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
-                    labelColor: (opacity = 1) => `rgba(156, 163, 175, ${opacity})`,
-                    propsForBackgroundLines: {
-                      strokeDasharray: '',
-                      stroke: 'rgba(55, 65, 81, 0.3)',
-                      strokeWidth: 1
-                    },
-                    style: {
+                <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: Dimensions.get('window').width - 64 }}>
+                  <LineChart
+                    data={{
+                      labels: getFilteredWeightData().map((d: any, idx: number) => {
+                        const filtered = getFilteredWeightData();
+                        const totalPoints = filtered.length;
+                        if (totalPoints <= 6) return format(new Date(d.date), 'MMM d');
+                        const interval = Math.ceil(totalPoints / 4);
+                        if (idx === 0 || idx === totalPoints - 1 || (idx % interval === 0 && idx < totalPoints - interval / 2)) {
+                          return format(new Date(d.date), 'MMM d');
+                        }
+                        return '';
+                      }),
+                      datasets: [{ data: getFilteredWeightData().map((d: any) => d.weight) }]
+                    }}
+                    width={Math.max(Dimensions.get('window').width - 64, getFilteredWeightData().length * 60)}
+                    height={220}
+                    fromZero={false}
+                    withHorizontalLines={true}
+                    withVerticalLines={false}
+                    withInnerLines={true}
+                    chartConfig={{
+                      backgroundColor: '#1f2937',
+                      backgroundGradientFrom: '#1f2937',
+                      backgroundGradientTo: '#1f2937',
+                      decimalPlaces: 1,
+                      color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
+                      labelColor: (opacity = 1) => `rgba(156, 163, 175, ${opacity})`,
+                      propsForBackgroundLines: {
+                        strokeDasharray: '',
+                        stroke: 'rgba(55, 65, 81, 0.3)',
+                        strokeWidth: 1
+                      },
+                      style: {
+                        borderRadius: 16
+                      },
+                      propsForDots: {
+                        r: '0'
+                      },
+                      strokeWidth: 3
+                    }}
+                    bezier
+                    style={{
+                      marginVertical: 8,
                       borderRadius: 16
-                    },
-                    propsForDots: {
-                      r: '0'
-                    },
-                    strokeWidth: 3
-                  }}
-                  bezier
-                  style={{
-                    marginVertical: 8,
-                    borderRadius: 16
-                  }}
-                />
+                    }}
+                  />
+                </ScrollView>
               </View>
             </>
           )}
@@ -761,23 +806,50 @@ export default function Dashboard() {
 
                 <View className="mb-6">
                   <Text className="text-gray-400 mb-2">Weight (kg)</Text>
-                  <TextInput
-                    className="bg-gray-800 text-white p-4 rounded-lg border border-gray-700"
-                    value={weightInput}
-                    onChangeText={setWeightInput}
-                    keyboardType="decimal-pad"
-                    placeholder="70.5"
-                    placeholderTextColor="#6b7280"
-                    returnKeyType="done"
-                    onSubmitEditing={handleLogMetrics}
-                  />
+                  <View className="flex-row items-center">
+                    <TouchableOpacity
+                      className="bg-gray-800 p-3 rounded-l-lg border border-gray-700 border-r-0"
+                      onPress={() => {
+                        let val = parseFloat(weightInput) || 0;
+                        val = Math.max(0, Math.round((val - 0.5) * 2) / 2);
+                        setWeightInput(val > 0 ? val.toFixed(1) : '');
+                      }}
+                      accessibilityLabel="Decrease weight by 0.5kg"
+                    >
+                      <Text className="text-white text-xl">-</Text>
+                    </TouchableOpacity>
+                    <TextInput
+                      className="bg-gray-800 text-white p-4 border-t border-b border-gray-700 w-24 text-center"
+                      value={weightInput}
+                      onChangeText={text => {
+                        // Only allow numbers and one decimal
+                        if (/^\d*(\.\d{0,1})?$/.test(text)) setWeightInput(text);
+                      }}
+                      keyboardType="decimal-pad"
+                      placeholder="70.5"
+                      placeholderTextColor="#6b7280"
+                      returnKeyType="done"
+                      onSubmitEditing={handleLogMetrics}
+                    />
+                    <TouchableOpacity
+                      className="bg-gray-800 p-3 rounded-r-lg border border-gray-700 border-l-0"
+                      onPress={() => {
+                        let val = parseFloat(weightInput) || 0;
+                        val = Math.round((val + 0.5) * 2) / 2;
+                        setWeightInput(val > 0 ? val.toFixed(1) : '0.5');
+                      }}
+                      accessibilityLabel="Increase weight by 0.5kg"
+                    >
+                      <Text className="text-white text-xl">+</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <TouchableOpacity
                   className="bg-blue-600 py-4 rounded-full mb-4"
                   onPress={handleLogMetrics}
                 >
-                  <Text className="text-white font-bold text-center text-lg">Save Weight</Text>
+                  <Text className="text-white font-bold text-center text-lg">Log</Text>
                 </TouchableOpacity>
               </View>
             </KeyboardAvoidingView>
@@ -986,6 +1058,28 @@ export default function Dashboard() {
           </View>
         </View>
       </Modal>
+
+      <WeightInputModal
+        visible={showWeightInput}
+        initialValue={weightInput}
+        onSave={async (val) => {
+          if (!user) return;
+          const weight = parseFloat(val);
+          if (isNaN(weight) || weight <= 0) {
+            showDialog('Invalid Input', 'Please enter a valid weight');
+            return;
+          }
+          try {
+            await metricsService.logBodyMetrics(user.id, { weight_kg: weight });
+            showDialog('Success', 'Weight logged!');
+            setShowWeightInput(false);
+            loadData();
+          } catch (error) {
+            showDialog('Error', 'Failed to log weight');
+          }
+        }}
+        onClose={() => setShowWeightInput(false)}
+      />
     </SafeAreaView>
   );
 }

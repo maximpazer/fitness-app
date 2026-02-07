@@ -20,11 +20,11 @@ export const RestTimer: React.FC<RestTimerProps> = ({
     };
 
     return (
-        <View className="absolute bottom-0 left-0 right-0 bg-gray-950 p-6 border-t border-gray-900 shadow-2xl">
+        <View className="absolute bottom-0 left-0 right-0 bg-gray-950 p-6 border-t border-gray-800 shadow-2xl">
             <View className="flex-row items-center justify-between mb-4">
                 <Text className="text-gray-400 font-bold uppercase tracking-widest text-xs">Resting</Text>
                 <TouchableOpacity onPress={onSkip}>
-                    <Ionicons name="close-circle" size={24} color="#6b7280" />
+                    <Ionicons name="close-circle" size={24} color="#9ca3af" />
                 </TouchableOpacity>
             </View>
 
@@ -38,14 +38,14 @@ export const RestTimer: React.FC<RestTimerProps> = ({
                 <View className="flex-row gap-3">
                     <TouchableOpacity
                         onPress={() => onAddTime(30)}
-                        className="bg-gray-800 px-4 h-12 rounded-xl items-center justify-center border border-gray-700 active:bg-gray-700"
+                        className="bg-gray-900 px-4 h-12 rounded-xl items-center justify-center border border-gray-800 active:bg-gray-800"
                     >
-                        <Text className="text-white font-bold text-sm">+30s</Text>
+                        <Text className="text-gray-200 font-bold text-sm">+30s</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
                         onPress={onSkip}
-                        className="bg-blue-600 px-6 h-12 rounded-xl items-center justify-center shadow-lg shadow-blue-500/20 active:bg-blue-700"
+                        className="bg-blue-600/90 px-6 h-12 rounded-xl items-center justify-center shadow-lg shadow-blue-500/20 active:bg-blue-600"
                     >
                         <Text className="text-white font-bold text-sm uppercase tracking-wide">Skip</Text>
                     </TouchableOpacity>

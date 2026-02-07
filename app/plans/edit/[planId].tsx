@@ -8,6 +8,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { NumericTextInput } from '@/components/NumericTextInput';
 
 type Exercise = Database['public']['Tables']['exercises']['Row'];
 
@@ -271,11 +272,11 @@ export default function EditPlan() {
                 {/* Duration */}
                 <View className="mb-6">
                     <Text className="text-white font-bold mb-2">Duration (weeks)</Text>
-                    <TextInput
+                    <NumericTextInput
                         className="bg-gray-900 text-white p-4 rounded-lg border border-gray-800"
                         value={durationWeeks}
                         onChangeText={setDurationWeeks}
-                        keyboardType="numeric"
+                        allowDecimal={false}
                         placeholder="4"
                         placeholderTextColor="#6b7280"
                     />

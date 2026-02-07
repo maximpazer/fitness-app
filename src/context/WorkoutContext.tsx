@@ -44,6 +44,8 @@ export type ActiveWorkout = {
     durationSeconds: number;
     hasAdHoc?: boolean;
     analysis?: any;
+    warmupDuration?: number; // seconds
+    cooldownDuration?: number; // seconds
 };
 
 type WorkoutContextType = {
@@ -51,9 +53,11 @@ type WorkoutContextType = {
     startWorkout: (planDay: any, initialExercises: Exercise[]) => void;
     initWorkout: (userId: string, dayId: string) => Promise<void>;
     updateSet: (exIdx: number, setIdx: number, data: Partial<WorkoutSet>) => void;
+    updateWorkoutData: (data: Partial<ActiveWorkout>) => void; // Generic update helper
     addSet: (exIdx: number) => void;
     removeSet: (exIdx: number, setIdx: number) => void;
     addExercise: (exercise: any) => void;
+    removeExercise: (exIdx: number) => void;
     finishWorkout: (userId: string) => Promise<void>;
     cancelWorkout: () => void;
     isMinimized: boolean;
@@ -260,6 +264,12 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setActiveWorkout({ ...activeWorkout, exercises: newExercises, hasAdHoc: true });
     };
 
+    const removeExercise = (exIdx: number) => {
+        if (!activeWorkout) return;
+        const newExercises = activeWorkout.exercises.filter((_, i) => i !== exIdx);
+        setActiveWorkout({ ...activeWorkout, exercises: newExercises });
+    };
+
     const finishWorkout = async (userId: string) => {
         if (!activeWorkout) return;
 
@@ -322,15 +332,27 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setIsMinimized(false);
     };
 
+    const updateWorkoutData = (data: Partial<ActiveWorkout>) => {
+        setActiveWorkout(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                ...data
+            };
+        });
+    };
+
     return (
         <WorkoutContext.Provider value={{
             activeWorkout,
             startWorkout,
             initWorkout,
             updateSet,
+            updateWorkoutData,
             addSet,
             removeSet,
             addExercise,
+            removeExercise,
             finishWorkout,
             cancelWorkout,
             isMinimized,

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface NotebookInputProps {
@@ -26,21 +26,44 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
     onClose
 }) => {
     const insets = useSafeAreaInsets();
-    
+
     // Local state for instant display
     const [displayValue, setDisplayValue] = useState(value);
-    
+
     // Sync displayValue when value prop changes (field navigation)
     useEffect(() => {
         setDisplayValue(value);
     }, [value]);
-    
+
+    // Handle physical keyboard input on Web
+    useEffect(() => {
+        if (Platform.OS === 'web' && visible) {
+            const handleKeyDown = (e: KeyboardEvent) => {
+                // Prevent default behavior for specific keys if necessary, 
+                // but usually fine to let them bubble unless we want to stop scrolling etc.
+
+                if (e.key >= '0' && e.key <= '9') {
+                    handlePress(e.key);
+                } else if (e.key === '.') {
+                    handlePress('.');
+                } else if (e.key === 'Backspace') {
+                    handlePress('backspace');
+                } else if (e.key === 'Enter') {
+                    onNext();
+                }
+            };
+
+            window.addEventListener('keydown', handleKeyDown);
+            return () => window.removeEventListener('keydown', handleKeyDown);
+        }
+    }, [visible, handlePress, onNext]);
+
     if (!visible) return null;
 
     const handlePress = useCallback((key: string) => {
         Haptics.selectionAsync();
         let newValue: string;
-        
+
         if (key === 'backspace') {
             newValue = displayValue.slice(0, -1);
         } else if (key === '.') {
@@ -56,7 +79,7 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
                 return; // Max length
             }
         }
-        
+
         setDisplayValue(newValue); // Instant UI update
         onChange(newValue); // Notify parent
     }, [displayValue, onChange]);
@@ -66,7 +89,7 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
         const num = parseFloat(displayValue) || 0;
         const next = Math.max(0, num + delta);
         const nextStr = next % 1 === 0 ? next.toString() : next.toFixed(1);
-        
+
         setDisplayValue(nextStr); // Instant UI update
         onChange(nextStr); // Notify parent
     }, [displayValue, onChange]);
@@ -89,7 +112,7 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
                 onPress={onClose}
                 style={styles.hideButton}
             >
-                <Ionicons name="chevron-down" size={18} color="#6b7280" />
+                <Ionicons name="chevron-down" size={18} color="#9ca3af" />
             </TouchableOpacity>
 
             {/* Header Removed (Preview redundant) */}
@@ -106,7 +129,7 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
                                     style={styles.keyButton}
                                 >
                                     {key === 'backspace' ? (
-                                        <Ionicons name="backspace" size={24} color="#ef4444" />
+                                        <Ionicons name="backspace" size={24} color="#9ca3af" />
                                     ) : (
                                         <Text style={styles.keyText}>{key}</Text>
                                     )}
@@ -159,9 +182,9 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
-        backgroundColor: '#1f2937',
+        backgroundColor: '#0b1220',
         borderTopWidth: 1,
-        borderTopColor: '#374151',
+        borderTopColor: '#1f2937',
         borderTopLeftRadius: 32,
         borderTopRightRadius: 32,
         shadowColor: '#000',
@@ -186,15 +209,15 @@ const styles = StyleSheet.create({
     keyButton: {
         flex: 1,
         height: 56,
-        backgroundColor: '#374151',
+        backgroundColor: '#111827',
         borderWidth: 1,
-        borderColor: '#4b5563',
+        borderColor: '#1f2937',
         borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
     },
     keyText: {
-        color: '#f3f4f6',
+        color: '#e5e7eb',
         fontSize: 24,
         fontWeight: 'bold',
     },
@@ -205,7 +228,7 @@ const styles = StyleSheet.create({
     },
     controlButton: {
         flex: 1,
-        backgroundColor: '#111827',
+        backgroundColor: '#0b1220',
         borderWidth: 1,
         borderColor: '#1f2937',
         borderRadius: 16,
@@ -214,11 +237,11 @@ const styles = StyleSheet.create({
         minHeight: 56,
     },
     stepper25: {
-        backgroundColor: 'rgba(234, 179, 8, 0.15)',
-        borderColor: 'rgba(234, 179, 8, 0.4)',
+        backgroundColor: 'rgba(251, 191, 36, 0.10)',
+        borderColor: 'rgba(251, 191, 36, 0.35)',
     },
     stepper25Text: {
-        color: '#eab308',
+        color: '#facc15',
         fontWeight: '900',
     },
     stepperBlue: {
@@ -229,9 +252,9 @@ const styles = StyleSheet.create({
         marginTop: 'auto',
     },
     navButton: {
-        backgroundColor: '#374151',
+        backgroundColor: '#111827',
         borderWidth: 1,
-        borderColor: '#4b5563',
+        borderColor: '#1f2937',
         borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
@@ -247,9 +270,9 @@ const styles = StyleSheet.create({
         width: 32,
         height: 32,
         borderRadius: 16,
-        backgroundColor: '#374151',
+        backgroundColor: '#111827',
         borderWidth: 1,
-        borderColor: '#4b5563',
+        borderColor: '#1f2937',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 10,

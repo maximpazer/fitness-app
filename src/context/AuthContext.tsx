@@ -10,6 +10,7 @@ type AuthContextType = {
     profile: Profile | null
     loading: boolean
     refreshProfile: () => Promise<void>
+    setProfileLocal: (profile: Profile | null) => void
     signOut: () => Promise<void>
 }
 
@@ -19,6 +20,7 @@ const AuthContext = createContext<AuthContextType>({
     profile: null,
     loading: true,
     refreshProfile: async () => { },
+    setProfileLocal: () => { },
     signOut: async () => { },
 })
 
@@ -70,12 +72,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (user) await fetchProfile(user.id)
     }
 
+    const setProfileLocal = (nextProfile: Profile | null) => {
+        setProfile(nextProfile)
+    }
+
     const signOut = async () => {
         await supabase.auth.signOut()
     }
 
     return (
-        <AuthContext.Provider value={{ user, session, profile, loading, refreshProfile, signOut }}>
+        <AuthContext.Provider value={{ user, session, profile, loading, refreshProfile, setProfileLocal, signOut }}>
             {children}
         </AuthContext.Provider>
     )

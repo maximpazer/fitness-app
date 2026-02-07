@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { memo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { SetRow } from './SetRow';
 
 interface ExerciseCardProps {
@@ -48,6 +49,19 @@ const ExerciseCardComponent: React.FC<ExerciseCardProps> = ({
         return sum + (parseInt(s.reps) || 0);
     }, 0);
 
+    const renderRightActions = (setIdx: number) => {
+        return (
+            <TouchableOpacity
+                onPress={() => onRemoveSet(setIdx)}
+                className="bg-red-500/90 justify-center items-center w-20 rounded-xl my-1 ml-2"
+                activeOpacity={0.7}
+            >
+                <Ionicons name="trash-outline" size={24} color="white" />
+                <Text className="text-white text-[10px] font-bold uppercase mt-1">Delete</Text>
+            </TouchableOpacity>
+        );
+    };
+
     return (
         <View className={`bg-gray-800 mb-4 rounded-2xl overflow-hidden border ${isExpanded ? 'border-blue-500/30' : 'border-gray-700'} shadow-lg`}>
 
@@ -57,32 +71,39 @@ const ExerciseCardComponent: React.FC<ExerciseCardProps> = ({
                 onPress={onToggleExpand}
                 className={`p-4 flex-row justify-between items-center ${isExpanded ? 'border-b border-gray-700 bg-gray-750' : 'bg-gray-800'}`}
             >
-                <View className="flex-1 mr-2">
-                    <Text className="font-bold text-lg leading-tight text-white" numberOfLines={2}>
-                        {exercise.name}
-                    </Text>
-                    <Text className="text-gray-400 text-[11px] font-semibold mt-1 uppercase tracking-tight">
-                        <Text className="text-blue-400">{exercise.category || exercise.target_muscle || 'Target'}</Text> · {completedSets}/{totalSets} sets · {totalReps} reps {isExpanded ? `· Best: ${maxWeight > 0 ? maxWeight + 'kg' : '-'}` : ''}
-                    </Text>
-                </View>
-
-                <View className="flex-row gap-4 items-center">
-                    {!isExpanded && isAllCompleted && (
-                        <View className="bg-green-500/20 w-8 h-8 rounded-full items-center justify-center border border-green-500/30">
-                            <Ionicons name="checkmark" size={18} color="#22c55e" />
+                <View className="flex-1">
+                    {/* Top Row: Title and Metadata/Actions */}
+                    <View className="flex-row justify-between items-start mb-2">
+                        <Text className="font-bold text-lg leading-tight text-white flex-1 mr-4" numberOfLines={2}>
+                            {exercise.name}
+                        </Text>
+                        <View className="flex-row items-center">
+                            {isExpanded && (
+                                <TouchableOpacity onPress={(e) => { e.stopPropagation(); onShowInfo(); }} className="p-1.5 bg-gray-700 rounded-full mr-2">
+                                    <Ionicons name="information-circle-outline" size={18} color="#9ca3af" />
+                                </TouchableOpacity>
+                            )}
+                            <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color="#6b7280" />
                         </View>
-                    )}
-                    {/* Info Button - Only show when expanded or always? User wants to access it. Let's keep it accessible. */}
-                    {isExpanded && (
-                        <TouchableOpacity onPress={(e) => { e.stopPropagation(); onShowInfo(); }} className="p-2 bg-gray-700 rounded-full">
-                            <Ionicons name="information-circle-outline" size={20} color="#9ca3af" />
-                        </TouchableOpacity>
-                    )}
-
-                    {/* Toggle Icon */}
-                    <View className="p-2">
-                        <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color="#6b7280" />
                     </View>
+
+                    {/* Progress Bar Row */}
+                    <View className="flex-row items-center mb-2">
+                        <View className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden mr-3" style={{ backgroundColor: '#2a2a2a' }}>
+                            <View
+                                style={{
+                                    width: `${totalSets > 0 ? (completedSets / totalSets) * 100 : 0}%`,
+                                    height: '100%',
+                                    backgroundColor: '#4CAF50'
+                                }}
+                            />
+                        </View>
+                        <Text className="text-gray-500 text-xs font-semibold">{completedSets}/{totalSets} sets</Text>
+                    </View>
+
+                    <Text className="text-gray-500 text-[10px] font-bold uppercase tracking-wide">
+                        <Text className="text-blue-400">{exercise.target_muscle || 'Target'}</Text> • {totalReps} Reps
+                    </Text>
                 </View>
             </TouchableOpacity>
 
@@ -106,8 +127,14 @@ const ExerciseCardComponent: React.FC<ExerciseCardProps> = ({
                             const isWeightActive = activeFieldId === `${exercise.exerciseId}-${idx}-weight`;
                             const isRepsActive = activeFieldId === `${exercise.exerciseId}-${idx}-reps`;
 
+
                             return (
-                                <View key={idx}>
+                                <Swipeable
+                                    key={`${exercise.exerciseId}-${idx}`}
+                                    renderRightActions={() => renderRightActions(idx)}
+                                    friction={2}
+                                    rightThreshold={40}
+                                >
                                     <SetRow
                                         setNumber={set.setNumber}
                                         weight={isWeightActive && localInputValue !== undefined ? localInputValue : set.weight}
@@ -120,7 +147,7 @@ const ExerciseCardComponent: React.FC<ExerciseCardProps> = ({
                                         onFocus={(field: 'weight' | 'reps') => onFocusField(idx, field)}
                                         onComplete={() => onCompleteSet(idx)}
                                     />
-                                </View>
+                                </Swipeable>
                             );
                         })}
                     </View>

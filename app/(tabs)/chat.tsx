@@ -135,20 +135,6 @@ const QUICK_ACTIONS: QuickAction[] = [
         color: '#3b82f6'
     },
     {
-        id: 'suggest_plan',
-        icon: 'calendar',
-        label: 'Suggest next week\'s plan',
-        prompt: 'Based on my recent training history and progress, suggest what I should focus on next week. Give me specific recommendations.',
-        color: '#8b5cf6'
-    },
-    {
-        id: 'plateau',
-        icon: 'trending-down',
-        label: 'Why am I stagnating?',
-        prompt: 'Look at my recent workout data and identify if any exercises are stagnating or showing no progress. Explain why this might be happening and what I can do.',
-        color: '#f59e0b'
-    },
-    {
         id: 'volume_analysis',
         icon: 'bar-chart',
         label: 'Analyze my training volume',
@@ -1027,41 +1013,7 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                                     I analyze your workouts, track your progress, and provide data-driven recommendations to help you reach your goals faster.
                                 </Text>
                             </View>
-                            
-                            {/* Quick Actions Grid */}
-                            <Text className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-3 px-1">
-                                Quick Actions
-                            </Text>
-                            <View className="gap-3">
-                                {QUICK_ACTIONS.map((action) => (
-                                    <TouchableOpacity
-                                        key={action.id}
-                                        className="bg-gray-900 border border-gray-800 p-4 rounded-2xl flex-row items-center active:bg-gray-800"
-                                        onPress={() => handleQuickAction(action)}
-                                    >
-                                        <View 
-                                            className="w-10 h-10 rounded-xl items-center justify-center mr-4"
-                                            style={{ backgroundColor: `${action.color}20` }}
-                                        >
-                                            <Ionicons name={action.icon} size={20} color={action.color} />
-                                        </View>
-                                        <Text className="text-white font-semibold text-base flex-1">{action.label}</Text>
-                                        <Ionicons name="arrow-forward" size={18} color="#6b7280" />
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                            
-                            {/* Or Ask Anything Section */}
-                            <View className="mt-8 items-center">
-                                <View className="flex-row items-center mb-3">
-                                    <View className="h-px bg-gray-800 flex-1" />
-                                    <Text className="text-gray-500 text-xs font-medium mx-3">OR ASK ANYTHING</Text>
-                                    <View className="h-px bg-gray-800 flex-1" />
-                                </View>
-                                <Text className="text-gray-500 text-sm text-center">
-                                    Type a question below about your training,{'\n'}nutrition, or recovery.
-                                </Text>
-                            </View>
+                        
                         </ScrollView>
                     )}
 

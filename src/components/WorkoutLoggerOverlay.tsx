@@ -1,3 +1,4 @@
+import { CircularRestTimer } from '@/components/logger/CircularRestTimer';
 import { ExerciseCard } from '@/components/logger/ExerciseCard';
 import { NotebookInput } from '@/components/logger/NotebookInput';
 import { SessionHeader } from '@/components/logger/SessionHeader';
@@ -10,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dimensions, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { ExercisePickerModal } from './ExercisePickerModal';
 import { ExerciseVideoModal } from './ExerciseVideoModal';
@@ -21,9 +22,11 @@ export const WorkoutLoggerOverlay = () => {
     const {
         activeWorkout,
         updateSet,
+        updateWorkoutData,
         addSet,
         removeSet,
         addExercise,
+        removeExercise,
         finishWorkout,
         cancelWorkout,
         setIsMinimized,
@@ -32,12 +35,36 @@ export const WorkoutLoggerOverlay = () => {
         duration
     } = useWorkout();
 
+    // -- Helpers --
+    const renderExerciseRightActions = (exIdx: number) => {
+        return (
+            <TouchableOpacity
+                onPress={() => {
+                    showDialog(
+                        "Remove Exercise",
+                        "Are you sure you want to remove this entire exercise and all its sets?",
+                        [
+                            { text: "Remove", style: "destructive", onPress: () => removeExercise(exIdx) },
+                            { text: "Cancel", style: "cancel" }
+                        ]
+                    );
+                }}
+                className="bg-red-500/90 justify-center items-center w-24 rounded-2xl mb-4 ml-2"
+                activeOpacity={0.7}
+            >
+                <Ionicons name="trash" size={28} color="white" />
+                <Text className="text-white text-xs font-bold uppercase mt-1">Remove</Text>
+            </TouchableOpacity>
+        );
+    };
+
     // -- State --
     // Expansion State (Single Expansion Mode as requested for "focus")
     const [expandedExId, setExpandedExId] = useState<string | null>(null);
 
     // Notebook Focus State with LOCAL input value for instant feedback
     const [focusedField, setFocusedField] = useState<{ exIdx: number, setIdx: number, field: 'weight' | 'reps' } | null>(null);
+    const [focusedExtra, setFocusedExtra] = useState<'warmup' | 'cooldown' | null>(null);
     const [localInputValue, setLocalInputValue] = useState<string>('');
 
     // Floating Rest Timer (Deprecated floating bubble, moving to Inline)
@@ -60,16 +87,16 @@ export const WorkoutLoggerOverlay = () => {
     const { height: SCREEN_HEIGHT } = Dimensions.get('window');
     const translateY = useSharedValue(SCREEN_HEIGHT);
     const isDragging = useSharedValue(false);
-    
+
     // Ref for instant access in callbacks without re-creating them
     const workoutRef = useRef(activeWorkout);
     useEffect(() => {
         workoutRef.current = activeWorkout;
     }, [activeWorkout]);
-    
+
     // Debounce timer for syncing local input to context
     const syncTimerRef = useRef<NodeJS.Timeout | null>(null);
-    
+
     // Cleanup sync timer on unmount
     useEffect(() => {
         return () => {
@@ -98,7 +125,7 @@ export const WorkoutLoggerOverlay = () => {
 
     // Rest Timer
     useEffect(() => {
-        let interval: NodeJS.Timeout;
+        let interval: any;
         if (isResting) {
             interval = setInterval(() => {
                 const now = Date.now();
@@ -161,6 +188,8 @@ export const WorkoutLoggerOverlay = () => {
         }, 0);
     }, [activeWorkout]);
 
+
+
     // -- Handlers --
 
     const handleSetComplete = useCallback((exIdx: number, setIdx: number) => {
@@ -200,38 +229,55 @@ export const WorkoutLoggerOverlay = () => {
 
     // Sync local input value to context (called when navigating away)
     const syncInputToContext = useCallback(() => {
-        if (!focusedField || !localInputValue) return;
-        const { exIdx, setIdx, field } = focusedField;
-        updateSet(exIdx, setIdx, { [field]: localInputValue });
-    }, [focusedField, localInputValue, updateSet]);
+        if (!localInputValue) return;
+
+        if (focusedField) {
+            const { exIdx, setIdx, field } = focusedField;
+            updateSet(exIdx, setIdx, { [field]: localInputValue });
+        } else if (focusedExtra) {
+            const numVal = parseFloat(localInputValue);
+            if (!isNaN(numVal)) {
+                if (focusedExtra === 'warmup') updateWorkoutData({ warmupDuration: numVal * 60 });
+                if (focusedExtra === 'cooldown') updateWorkoutData({ cooldownDuration: numVal * 60 });
+            }
+        }
+    }, [focusedField, focusedExtra, localInputValue, updateSet, updateWorkoutData]);
 
     // Notebook Input - LOCAL state for instant feedback
     const handleInputUpdate = useCallback((val: string) => {
         setLocalInputValue(val);
-        
+
         // Clear previous timer
         if (syncTimerRef.current) {
             clearTimeout(syncTimerRef.current);
         }
-        
+
         // Debounce sync to context (300ms)
         syncTimerRef.current = setTimeout(() => {
-            if (!focusedField) return;
-            const { exIdx, setIdx, field } = focusedField;
-            updateSet(exIdx, setIdx, { [field]: val });
+            const numVal = parseFloat(val);
+
+            if (focusedField) {
+                const { exIdx, setIdx, field } = focusedField;
+                updateSet(exIdx, setIdx, { [field]: val });
+            } else if (focusedExtra) {
+                if (!isNaN(numVal)) {
+                    if (focusedExtra === 'warmup') updateWorkoutData({ warmupDuration: numVal * 60 });
+                    if (focusedExtra === 'cooldown') updateWorkoutData({ cooldownDuration: numVal * 60 });
+                }
+            }
         }, 300);
-    }, [focusedField, updateSet]);
+    }, [focusedField, focusedExtra, updateSet, updateWorkoutData]);
 
     const handleNav = useCallback((dir: 'next' | 'prev') => {
         if (!focusedField || !workoutRef.current) return;
-        
+
         // Sync current value to context immediately before navigating
         if (localInputValue && syncTimerRef.current) {
             clearTimeout(syncTimerRef.current);
             const { exIdx, setIdx, field } = focusedField;
             updateSet(exIdx, setIdx, { [field]: localInputValue });
         }
-        
+
         const { exIdx, setIdx, field } = focusedField;
         const currentEx = workoutRef.current.exercises[exIdx];
 
@@ -367,73 +413,127 @@ export const WorkoutLoggerOverlay = () => {
                         />
                     )}
 
-                    <View style={{ paddingTop: 10 }} className="bg-gray-800">
-                        <SessionHeader
-                            workoutName={activeWorkout.name}
-                            durationSeconds={duration}
-                            volumeKg={totalVolume}
-                            onExit={() => showDialog(
-                                "Exit Workout",
-                                "Are you sure you want to stop? Your progress will not be saved.",
-                                [
-                                    { text: "Exit", style: 'destructive', onPress: cancelWorkout },
-                                    { text: "Continue", style: 'cancel' }
-                                ]
-                            )}
-                        />
-                    </View>
+                    <SessionHeader
+                        workoutName={activeWorkout.name}
+                        durationSeconds={duration}
+                        volumeKg={totalVolume}
+                        onExit={() => showDialog(
+                            "Exit Workout",
+                            "Are you sure you want to stop? Your progress will not be saved.",
+                            [
+                                { text: "Exit", style: 'destructive', onPress: cancelWorkout },
+                                { text: "Continue", style: 'cancel' }
+                            ]
+                        )}
+                    />
 
-                    <SessionRestBar
+                    <CircularRestTimer
                         visible={isResting}
                         startTime={restTimerStart}
                         duration={restTimerDuration}
                         onSkip={() => setIsResting(false)}
+                        onAddTime={(seconds) => setRestTimerStart(prev => (prev || Date.now()) + seconds * 1000)}
                     />
 
                     <FlatList
                         data={activeWorkout.exercises}
                         keyExtractor={(item) => item.exerciseId}
                         extraData={activeWorkout}
-                        style={{ opacity: isResting ? 0.92 : 1 }}
+                        style={{ opacity: isResting ? 0.92 : 1, flex: 1 }}
                         contentContainerStyle={{ padding: 16, paddingBottom: 400 }}
                         renderItem={({ item: ex, index: exIdx }) => (
-                            <ExerciseCard
-                                exercise={ex}
-                                isExpanded={expandedExId === ex.exerciseId}
-                                historySets={exHistory[ex.exerciseId]?.sets}
-                                activeFieldId={focusedField?.exIdx === exIdx ? `${ex.exerciseId}-${focusedField.setIdx}-${focusedField.field}` : undefined}
-                                localInputValue={focusedField?.exIdx === exIdx ? localInputValue : undefined}
-                                onFocusField={(sIdx, field) => {
-                                    const currentValue = ex.sets[sIdx][field] || '';
-                                    setLocalInputValue(currentValue);
-                                    setFocusedField({ exIdx, setIdx: sIdx, field });
-                                    setExpandedExId(ex.exerciseId); // Auto-expand on tap
-                                }}
-                                onCompleteSet={(sIdx) => handleSetComplete(exIdx, sIdx)}
-                                onAddSet={() => handleAddSet(exIdx)}
-                                onRemoveSet={(sIdx) => removeSet(exIdx, sIdx)}
-                                onShowInfo={() => setSelectedExercise(ex)}
-                                onToggleExpand={() => setExpandedExId(expandedExId === ex.exerciseId ? null : ex.exerciseId)}
-                                onStopResting={() => setIsResting(false)}
-                            />
+                            <Swipeable
+                                key={ex.exerciseId}
+                                renderRightActions={() => renderExerciseRightActions(exIdx)}
+                                friction={2}
+                                rightThreshold={40}
+                            >
+                                <ExerciseCard
+                                    exercise={ex}
+                                    isExpanded={expandedExId === ex.exerciseId}
+                                    historySets={exHistory[ex.exerciseId]?.sets}
+                                    activeFieldId={focusedField?.exIdx === exIdx ? `${ex.exerciseId}-${focusedField.setIdx}-${focusedField.field}` : undefined}
+                                    localInputValue={focusedField?.exIdx === exIdx ? localInputValue : undefined}
+                                    onFocusField={(sIdx, field) => {
+                                        const currentValue = ex.sets[sIdx][field] || '';
+                                        setLocalInputValue(currentValue);
+                                        setFocusedField({ exIdx, setIdx: sIdx, field });
+                                        setExpandedExId(ex.exerciseId); // Auto-expand on tap
+                                    }}
+                                    onCompleteSet={(sIdx) => handleSetComplete(exIdx, sIdx)}
+                                    onAddSet={() => handleAddSet(exIdx)}
+                                    onRemoveSet={(sIdx) => removeSet(exIdx, sIdx)}
+                                    onShowInfo={() => setSelectedExercise(ex)}
+                                    onToggleExpand={() => setExpandedExId(expandedExId === ex.exerciseId ? null : ex.exerciseId)}
+                                    onStopResting={() => setIsResting(false)}
+                                />
+                            </Swipeable>
                         )}
+                        ListHeaderComponent={
+                            <View className="mb-4 flex-row justify-center">
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setFocusedField(null);
+                                        setLocalInputValue(activeWorkout.warmupDuration ? (activeWorkout.warmupDuration / 60).toString() : '');
+                                        setFocusedExtra('warmup');
+                                    }}
+                                    style={{
+                                        backgroundColor: '#2a2a2a',
+                                        borderColor: '#FF6B35',
+                                        borderWidth: 1
+                                    }}
+                                    className="flex-row items-center px-5 py-3 rounded-full"
+                                >
+                                    <Ionicons name="flame" size={18} color="#FF6B35" />
+                                    <Text style={{ color: '#FF6B35', fontWeight: '600' }} className="ml-2 text-sm uppercase tracking-wide">
+                                        {activeWorkout.warmupDuration
+                                            ? `Warmup: ${Math.round(activeWorkout.warmupDuration / 60)} min`
+                                            : "Add Warmup"}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        }
                         ListFooterComponent={
-                            <View className="gap-4 mt-2">
+                            <View className="gap-6 mt-4 pb-10">
+                                <View className="flex-row justify-center">
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setFocusedField(null);
+                                            setLocalInputValue(activeWorkout.cooldownDuration ? (activeWorkout.cooldownDuration / 60).toString() : '');
+                                            setFocusedExtra('cooldown');
+                                        }}
+                                        style={{
+                                            backgroundColor: '#2a2a2a',
+                                            borderColor: '#FF6B35',
+                                            borderWidth: 1
+                                        }}
+                                        className="flex-row items-center px-5 py-3 rounded-full"
+                                    >
+                                        <Ionicons name="snow" size={18} color="#FF6B35" />
+                                        <Text style={{ color: '#FF6B35', fontWeight: '600' }} className="ml-2 text-sm uppercase tracking-wide">
+                                            {activeWorkout.cooldownDuration
+                                                ? `Cooldown: ${Math.round(activeWorkout.cooldownDuration / 60)} min`
+                                                : "Add Cooldown"}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+
                                 <TouchableOpacity
                                     onPress={() => setAddExVisible(true)}
-                                    className="py-4 border-2 border-dashed border-gray-600 rounded-2xl items-center active:bg-gray-700/30 bg-gray-800/50"
+                                    className="py-2 items-center active:opacity-60"
                                 >
                                     <View className="flex-row items-center">
-                                        <Ionicons name="search" size={20} color="#60a5fa" />
-                                        <Text className="text-gray-300 font-bold ml-2">ADD EXERCISE</Text>
+                                        <Ionicons name="add-circle-outline" size={22} color="#3b82f6" />
+                                        <Text className="text-blue-500 font-black ml-2 uppercase tracking-widest text-xs">Add Exercise</Text>
                                     </View>
                                 </TouchableOpacity>
 
                                 <TouchableOpacity
                                     onPress={handleFinishPress}
-                                    className="bg-green-600 p-4 rounded-xl items-center"
+                                    activeOpacity={0.8}
+                                    className="bg-blue-600 py-5 rounded-2xl items-center shadow-lg shadow-blue-500/30"
                                 >
-                                    <Text className="text-white font-bold text-lg">PROCEED TO FINISH</Text>
+                                    <Text className="text-white font-black text-lg uppercase tracking-[0.1em]">Proceed to Finish</Text>
                                 </TouchableOpacity>
                             </View>
                         }
@@ -442,15 +542,19 @@ export const WorkoutLoggerOverlay = () => {
                     {/* Floating Rest Timer Deprecated */}
 
                     <NotebookInput
-                        visible={!!focusedField}
+                        visible={!!focusedField || !!focusedExtra}
                         value={localInputValue}
-                        label={getFocusedLabel()}
+                        label={focusedExtra
+                            ? (focusedExtra === 'warmup' ? 'Warmup Duration (min)' : 'Cooldown Duration (min)')
+                            : getFocusedLabel()
+                        }
                         onChange={handleInputUpdate}
                         onNext={() => handleNav('next')}
                         onPrev={() => handleNav('prev')}
                         onClose={() => {
                             syncInputToContext();
                             setFocusedField(null);
+                            setFocusedExtra(null);
                             setLocalInputValue('');
                         }}
                     />

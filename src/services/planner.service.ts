@@ -56,7 +56,7 @@ export const plannerService = {
       `)
             .eq('user_id', userId)
             .eq('is_active', true)
-            .single();
+            .maybeSingle();
 
         if (error) {
             if (error.code === 'PGRST116') return null; // No rows found
@@ -90,7 +90,7 @@ export const plannerService = {
                 )
             `)
             .eq('id', planId)
-            .single();
+            .maybeSingle();
 
         if (error) {
             if (error.code === 'PGRST116') return null;
@@ -151,7 +151,7 @@ export const plannerService = {
                 created_at: new Date().toISOString()
             } as any)
             .select()
-            .single() as any);
+            .maybeSingle() as any);
 
         if (planError) throw planError;
         if (!newPlan) throw new Error('Failed to create plan');
@@ -168,7 +168,7 @@ export const plannerService = {
                     notes: day.notes
                 } as any)
                 .select()
-                .single() as any);
+                .maybeSingle() as any);
 
             if (dayError) throw dayError;
             if (!newDay) throw new Error('Failed to create day');
@@ -257,7 +257,7 @@ export const plannerService = {
                         notes: day.notes
                     } as any)
                     .select()
-                    .single() as any);
+                    .maybeSingle() as any);
 
                 if (insertError) throw insertError;
                 dayId = (newDay as any).id;
@@ -307,7 +307,7 @@ export const plannerService = {
                 )
             `)
             .eq('id', dayId)
-            .single();
+            .maybeSingle();
 
         if (error) throw error;
 
@@ -469,7 +469,7 @@ export const plannerService = {
             .from('workout_plans')
             .select('is_archived')
             .eq('id', planId)
-            .single();
+            .maybeSingle();
 
         if (checkError || !plan) {
             throw new Error('Plan not found');

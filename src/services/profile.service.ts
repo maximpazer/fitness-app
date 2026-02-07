@@ -14,8 +14,7 @@ export const profileService = {
     async updateProfile(userId: string, updates: Partial<Profile>) {
         const { data, error } = await supabase
             .from('profiles')
-            .update(updates as any)
-            .eq('id', userId)
+            .upsert({ id: userId, ...updates } as any, { onConflict: 'id' })
             .select()
             .single()
         return { data, error }

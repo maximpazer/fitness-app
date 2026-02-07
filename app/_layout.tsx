@@ -8,6 +8,8 @@ import '../global.css';
 import { WorkoutLoggerOverlay } from '@/components/WorkoutLoggerOverlay';
 import { AuthProvider, useAuthContext } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { NumericKeypadProvider } from '@/context/NumericKeypadContext';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -24,21 +26,28 @@ function RootLayoutNav() {
 
     const inAuthGroup = segments[0] === '(auth)';
     const user = session?.user;
-    const isProfileComplete = profile?.fitness_level; // Simple check
 
-    if (!user && !inAuthGroup) {
-      // Redirect to the sign-in page.
-      router.replace('/(auth)/login');
-    } else if (user) {
-      if (!isProfileComplete) {
-        // Force onboarding if profile is incomplete
-        if (segments[0] !== 'onboarding') {
-          router.replace('/onboarding');
-        }
-      } else if (inAuthGroup || segments[0] === 'onboarding') {
-        // Redirect away from auth/onboarding if profile is complete
-        router.replace('/(tabs)');
-      }
+    const isProfileComplete = !!(profile?.fitness_level && profile?.primary_goal && profile?.training_days_per_week);
+    const needsOnboarding = false; // Disabled onboarding
+
+    if (!user) {
+      if (!inAuthGroup) router.replace('/(auth)/login');
+      return;
+    }
+
+    // Authenticated
+    if (needsOnboarding && segments[0] !== 'onboarding') {
+      router.replace('/onboarding');
+      return;
+    }
+
+    if (!needsOnboarding && segments[0] === 'onboarding') {
+      router.replace('/(tabs)');
+      return;
+    }
+
+    if (inAuthGroup) {
+      router.replace('/(tabs)');
     }
   }, [session, loading, segments, profile]);
 
@@ -48,6 +57,7 @@ function RootLayoutNav() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="profile" options={{ title: 'Profile', headerBackTitle: 'Back' }} />
           <Stack.Screen name="workout/summary/[id]" options={{ presentation: 'card', headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
@@ -76,15 +86,19 @@ function AppProviders({ children }: { children: React.ReactNode }) {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <WorkoutProvider>
-          <DialogProvider>
-            <AppProviders>
-              <RootLayoutNav />
-            </AppProviders>
-          </DialogProvider>
-        </WorkoutProvider>
-      </AuthProvider>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <WorkoutProvider>
+            <DialogProvider>
+              <AppProviders>
+                <NumericKeypadProvider>
+                  <RootLayoutNav />
+                </NumericKeypadProvider>
+              </AppProviders>
+            </DialogProvider>
+          </WorkoutProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

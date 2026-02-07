@@ -28,7 +28,7 @@ export const metricsService = {
                 logged_at: new Date().toISOString()
             } as any)
             .select()
-            .single();
+            .maybeSingle();
 
         if (error) throw error;
         return metric as BodyMetric;
@@ -53,7 +53,7 @@ export const metricsService = {
             .eq('user_id', userId)
             .order('logged_at', { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle();
 
         if (error) {
             if (error.code === 'PGRST116') return null; // No rows
