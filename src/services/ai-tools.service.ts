@@ -14,6 +14,8 @@ import { supabase } from '@/lib/supabase';
 import { differenceInDays, format, startOfWeek, subDays } from 'date-fns';
 
 // Tool definitions for Gemini function calling
+const embeddingCache = new Map<string, number[]>();
+
 export const AI_TOOLS = {
     declarations: [
         {
@@ -158,25 +160,35 @@ export const AI_TOOLS = {
         },
         {
             name: 'search_exercises',
-            description: 'Search for canonical exercises to use in plan creation. Returns a curated list of standard exercises (bench press, squat, deadlift, etc). Use the canonical_name in create_plan_proposal - the system will automatically select the best variant based on user equipment.',
+            description: 'Search for exercises using semantic search. REQUIRED for plan creation. Understands natural language queries like \'calisthenics back exercises\', \'explosive leg movements\', \'dumbbell chest isolation\'. Returns exercises with valid UUIDs needed for create_plan_proposal.',
             parameters: {
                 type: 'object',
                 properties: {
                     query: {
                         type: 'string',
-                        description: 'Search term (e.g., "press", "squat", "pull", "curl")',
+                        description: 'Natural language search query. Examples: "bodyweight push exercises", "explosive leg movements", "dumbbell chest isolation", "plyometric movements", "anti-rotational core". Be specific about the goals.'
                     },
-                    muscle: {
+                    equipment: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Optional equipment filter. Only use if user specifically mentions equipment. Available: ["Bodyweight"], ["Barbell"], ["Dumbbell"], ["Cable"], ["Kettlebell"], ["EZ Bar"], ["Bench (Flat)"], ["Bench (Incline)"], ["Weight Plate"]. For broad terms like "gym exercises" or "machine exercises", omit this filter to get all relevant exercises.'
+                    },
+                    category: {
                         type: 'string',
-                        description: 'Target muscle (e.g., "Chest", "Back", "Quadriceps", "Shoulders")',
+                        description: 'Filter by body category: "legs", "chest", "back", "shoulders", "arms", "core"'
                     },
-                    movement_pattern: {
-                        type: 'string',
-                        enum: ['push', 'pull', 'hinge', 'squat', 'lunge', 'isolation'],
-                        description: 'Movement pattern filter',
+                    limit: {
+                        type: 'number',
+                        description: 'Max results to return (default 20, max 50)',
+                        default: 20
                     },
+                    preferCompound: {
+                        type: 'boolean',
+                        description: 'Prefer compound movements (multi-joint) over isolation (default true)',
+                        default: true
+                    }
                 },
-                required: [],
+                required: ['query'],
             },
         },
         {
@@ -211,12 +223,13 @@ export const AI_TOOLS = {
                                     items: {
                                         type: 'object',
                                         properties: {
-                                            exercise_name: { type: 'string', description: 'canonical_name from search_exercises (e.g., "bench_press", "squat")' },
+                                            exercise_name: { type: 'string', description: 'Display name of the exercise EXACTLY as returned by search_exercises' },
+                                            exercise_id: { type: 'string', description: 'REQUIRED UUID of the exercise from search_exercises. You MUST search first to get this.' },
                                             target_sets: { type: 'number', description: 'Number of sets (typically 3-5)' },
                                             target_reps: { type: 'string', description: 'Rep range (e.g., "8-12", "5", "12-15")' },
-                                            rest_seconds: { type: 'number', description: 'Rest between sets in seconds' },
+                                            rest_seconds: { type: 'number', description: 'Rest between sets in seconds (default 90)' },
                                         },
-                                        required: ['exercise_name', 'target_sets', 'target_reps'],
+                                        required: ['exercise_name', 'exercise_id', 'target_sets', 'target_reps'],
                                     },
                                 },
                             },
@@ -247,14 +260,14 @@ const periodToDays = (period: string): number => {
 const getPeriodDateRange = (period: string): { start: Date; end: Date } => {
     const now = new Date();
     const weekStart = startOfWeek(now);
-    
+
     switch (period) {
         case 'this_week':
             return { start: weekStart, end: now };
         case 'last_week':
-            return { 
-                start: subDays(weekStart, 7), 
-                end: subDays(weekStart, 1) 
+            return {
+                start: subDays(weekStart, 7),
+                end: subDays(weekStart, 1)
             };
         case 'last_2_weeks':
             return { start: subDays(now, 14), end: now };
@@ -270,7 +283,8 @@ export const aiToolsService = {
     async executeFunction(userId: string, functionName: string, args: any): Promise<any> {
         switch (functionName) {
             case 'search_exercises':
-                return this.searchExercises(args);
+                // Only semantic search for plan creation
+                return this.searchExercisesSemantic(args);
             case 'create_plan_proposal':
                 return this.createPlanProposal(args);
             case 'get_recent_workout_summary':
@@ -336,7 +350,7 @@ export const aiToolsService = {
             w.workout_exercises?.forEach((we: any) => {
                 const workingSets = we.sets?.filter((s: any) => !s.is_warmup) || [];
                 totalSets += workingSets.length;
-                
+
                 workingSets.forEach((s: any) => {
                     totalVolume += (s.weight_kg || 0) * (s.reps || 0);
                 });
@@ -398,8 +412,8 @@ export const aiToolsService = {
         // Filter by workout type if specified
         let targetWorkout = workouts[0];
         if (workoutType) {
-            const filtered = workouts.find((w: any) => 
-                w.workout_exercises?.some((we: any) => 
+            const filtered = workouts.find((w: any) =>
+                w.workout_exercises?.some((we: any) =>
                     we.exercise?.category?.toLowerCase().includes(workoutType.toLowerCase()) ||
                     we.exercise?.muscle_groups?.some((m: string) => m.toLowerCase().includes(workoutType.toLowerCase()))
                 )
@@ -408,10 +422,10 @@ export const aiToolsService = {
         }
 
         const workout = targetWorkout as any;
-        
+
         // Summarize exercises (names only, no raw data)
         const exerciseNames = workout.workout_exercises?.map((we: any) => we.exercise?.name).filter(Boolean) || [];
-        
+
         let totalSets = 0;
         let totalVolume = 0;
         workout.workout_exercises?.forEach((we: any) => {
@@ -482,7 +496,7 @@ export const aiToolsService = {
         const sessions = workouts.map((w: any) => {
             const exerciseData = w.workout_exercises[0];
             const workingSets = exerciseData.sets.filter((s: any) => !s.is_warmup);
-            
+
             if (workingSets.length === 0) return null;
 
             const maxWeight = Math.max(...workingSets.map((s: any) => s.weight_kg || 0));
@@ -511,7 +525,7 @@ export const aiToolsService = {
         const first = sessions[0] as { max_weight: number; volume: number; reps: number };
         const last = sessions[sessions.length - 1] as { max_weight: number; volume: number; reps: number };
         const metricKey = metric === 'max_weight' ? 'max_weight' : metric === 'volume' ? 'volume' : 'reps';
-        
+
         const startValue = first[metricKey];
         const endValue = last[metricKey];
         const change = endValue - startValue;
@@ -572,7 +586,7 @@ export const aiToolsService = {
         // Calculate gaps between sessions
         let maxGapDays = 0;
         let avgGapDays = 0;
-        
+
         if (sessions.length >= 2) {
             const gaps: number[] = [];
             for (let i = 1; i < sessions.length; i++) {
@@ -587,7 +601,7 @@ export const aiToolsService = {
         }
 
         // Days since last session
-        const daysSinceLast = sessions.length > 0 
+        const daysSinceLast = sessions.length > 0
             ? differenceInDays(new Date(), new Date(sessions[sessions.length - 1].completed_at))
             : null;
 
@@ -642,7 +656,7 @@ export const aiToolsService = {
             w.workout_exercises?.forEach((we: any) => {
                 const workingSets = we.sets?.filter((s: any) => !s.is_warmup).length || 0;
                 const muscles = we.exercise?.muscle_groups || [we.exercise?.category];
-                
+
                 muscles?.forEach((m: string) => {
                     if (m) {
                         const normalized = m.toLowerCase();
@@ -656,8 +670,8 @@ export const aiToolsService = {
         const coverage = allMuscles.map(muscle => ({
             muscle,
             sets: muscleSetCount[muscle] || 0,
-            status: (muscleSetCount[muscle] || 0) >= 10 ? 'adequate' : 
-                    (muscleSetCount[muscle] || 0) >= 5 ? 'light' : 'neglected',
+            status: (muscleSetCount[muscle] || 0) >= 10 ? 'adequate' :
+                (muscleSetCount[muscle] || 0) >= 5 ? 'light' : 'neglected',
         }));
 
         const neglected = coverage.filter(c => c.status === 'neglected').map(c => c.muscle);
@@ -669,8 +683,8 @@ export const aiToolsService = {
             coverage: coverage.sort((a, b) => b.sets - a.sets),
             neglected_muscles: neglected,
             most_trained: mostTrained.map(m => m.muscle),
-            balance_assessment: neglected.length === 0 ? 'balanced' : 
-                               neglected.length <= 2 ? 'minor_imbalance' : 'significant_imbalance',
+            balance_assessment: neglected.length === 0 ? 'balanced' :
+                neglected.length <= 2 ? 'minor_imbalance' : 'significant_imbalance',
         };
     },
 
@@ -680,7 +694,7 @@ export const aiToolsService = {
     async compareWorkoutPeriods(userId: string, period1: string, period2: string) {
         const getPeriodMetrics = async (period: string) => {
             const { start, end } = getPeriodDateRange(period);
-            
+
             const { data: workouts } = await supabase
                 .from('completed_workouts')
                 .select(`
@@ -728,7 +742,7 @@ export const aiToolsService = {
             return { error: 'Could not retrieve data for comparison' };
         }
 
-        const volumeChange = metrics1.total_volume > 0 
+        const volumeChange = metrics1.total_volume > 0
             ? Math.round(((metrics2.total_volume - metrics1.total_volume) / metrics1.total_volume) * 100)
             : 0;
 
@@ -794,9 +808,9 @@ export const aiToolsService = {
             };
         }
 
-        const topSet = workingSets.reduce((best: any, s: any) => 
+        const topSet = workingSets.reduce((best: any, s: any) =>
             (s.weight_kg || 0) > (best.weight_kg || 0) ? s : best
-        , workingSets[0]);
+            , workingSets[0]);
 
         return {
             exercise_name: exercise.name,
@@ -848,11 +862,9 @@ export const aiToolsService = {
     },
 
     /**
-     * Search canonical exercises - for plan creation
-     * Returns curated list of 30 standard exercises
-     * AI selects canonical names, backend picks best variant for user
+     * // DEPRECATED: Legacy canonical search - keeping for reference
      */
-    async searchExercises(args: {
+    async searchExercisesCanonical(args: {
         query?: string;
         muscle?: string;
         movement_pattern?: string;
@@ -884,7 +896,7 @@ export const aiToolsService = {
         const { data: canonicals, error } = await dbQuery;
 
         if (error) {
-            console.error('[searchExercises] Error:', error);
+            console.error('[searchExercisesCanonical] Error:', error);
             return { error: 'Failed to search exercises', details: error.message };
         }
 
@@ -895,7 +907,7 @@ export const aiToolsService = {
                 .select('canonical_name, display_name, movement_pattern, primary_muscle, equipment_category')
                 .eq('is_active', true)
                 .order('sort_order');
-            
+
             return {
                 query: args,
                 results: (allCanonicals || []).map((c: any) => ({
@@ -925,6 +937,271 @@ export const aiToolsService = {
     },
 
     /**
+     * Semantic search for exercises using embeddings
+     */
+    async searchExercisesSemantic(args: {
+        query: string;
+        equipment?: string[];
+        category?: string;
+        limit?: number;
+        threshold?: number;
+        preferCompound?: boolean;
+    }) {
+        const {
+            query,
+            equipment,
+            category,
+            limit = 20,
+            threshold = 0.50,  // Lower threshold for more results
+            preferCompound = true
+        } = args;
+
+        try {
+            const normalizedQuery = query.toLowerCase().trim();
+            let embedding: number[];
+
+            // Check if API key is available
+            if (!process.env.EXPO_PUBLIC_OPENAI_API_KEY) {
+                console.error('[searchExercisesSemantic] OpenAI API key not found');
+                console.error('[searchExercisesSemantic] Available env vars:', Object.keys(process.env).filter(k => k.includes('OPENAI')));
+                return {
+                    error: 'OpenAI API key not configured. Cannot perform semantic search.',
+                    fallback_message: 'Please use the basic search or configure EXPO_PUBLIC_OPENAI_API_KEY'
+                };
+            }
+
+            console.log(`[searchExercisesSemantic] Searching for: "${query}" with equipment: ${JSON.stringify(equipment)}`);
+
+            // Diagnostic: Check what equipment values exist in database
+            if (equipment && equipment.includes('Machine')) {
+                try {
+                    const { data: equipmentCheck } = await supabase
+                        .from('exercises')
+                        .select('equipment_needed')
+                        .not('equipment_needed', 'is', null)
+                        .limit(100);
+
+                    const allEquipment = new Set();
+                    equipmentCheck?.forEach((ex: any) => {
+                        if (Array.isArray(ex.equipment_needed)) {
+                            ex.equipment_needed.forEach((eq: string) => allEquipment.add(eq));
+                        }
+                    });
+
+                    console.log('[searchExercisesSemantic] Available equipment in database:', Array.from(allEquipment).sort());
+                } catch (diagError) {
+                    console.warn('[searchExercisesSemantic] Diagnostic check failed:', diagError);
+                }
+            }
+
+            // 1. Check Cache
+            if (embeddingCache.has(normalizedQuery)) {
+                embedding = embeddingCache.get(normalizedQuery)!;
+                console.log(`[searchExercisesSemantic] Cache hit for: "${normalizedQuery}"`);
+            } else {
+                // 2. Fetch from OpenAI
+                console.log(`[searchExercisesSemantic] Cache miss, fetching embedding for: "${normalizedQuery}"`);
+                const response = await fetch('https://api.openai.com/v1/embeddings', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_OPENAI_API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'text-embedding-3-small',
+                        input: normalizedQuery
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`OpenAI API Error: ${errorData.error?.message || response.statusText}`);
+                }
+
+                const embeddingData = await response.json();
+                embedding = embeddingData.data[0].embedding;
+
+                // 3. Manage Cache (max 100 entries)
+                if (embeddingCache.size >= 100) {
+                    const firstKey = embeddingCache.keys().next().value;
+                    if (firstKey !== undefined) embeddingCache.delete(firstKey);
+                }
+                embeddingCache.set(normalizedQuery, embedding);
+            }
+
+            // 4. Call Supabase RPC
+            console.log(`[searchExercisesSemantic] Calling Supabase RPC with threshold=${threshold}, limit=${Math.min(limit, 50)}`);
+            const { data: results, error } = await (supabase.rpc as any)('match_exercises_ranked', {
+                query_embedding: embedding,
+                match_threshold: threshold,
+                match_count: Math.min(limit, 50),
+                filter_equipment: equipment || null,
+                filter_category: category || null,
+                prefer_compound: preferCompound
+            });
+
+            if (error) {
+                console.error('[searchExercisesSemantic] RPC Error:', error);
+                console.error('[searchExercisesSemantic] RPC Error Details:', {
+                    code: error.code,
+                    message: error.message,
+                    details: error.details,
+                    hint: error.hint
+                });
+                return {
+                    error: 'Database search failed. The exercise database may be temporarily unavailable.',
+                    details: error.message,
+                    suggestion: 'Please try a different search or try again later.'
+                };
+            }
+
+            // 5. Fallback if no results
+            if (!results || (results as any).length === 0) {
+                console.log(`[searchExercisesSemantic] No results above ${threshold}, trying fallback...`);
+                const { data: fallbackResults } = await (supabase.rpc as any)('match_exercises_ranked', {
+                    query_embedding: embedding,
+                    match_threshold: 0.2,  // Much lower threshold
+                    match_count: Math.min(limit, 50),
+                    filter_equipment: equipment || null,
+                    filter_category: category || null,
+                    prefer_compound: false
+                });
+
+                if (!fallbackResults || (fallbackResults as any).length === 0) {
+                    // If semantic search completely fails, try basic keyword search
+                    console.log('[searchExercisesSemantic] Semantic fallback failed, trying keyword search...');
+
+                    let keywordQuery = supabase
+                        .from('exercises')
+                        .select('id, name, description, target_muscle, equipment_needed, muscle_groups, difficulty, is_compound')
+                        .or(`name.ilike.%${query}%,description.ilike.%${query}%,target_muscle.ilike.%${query}%`)
+                        .order('name');
+
+                    // Apply equipment filter if provided
+                    if (equipment && equipment.length > 0) {
+                        keywordQuery = keywordQuery.overlaps('equipment_needed', equipment);
+                    }
+
+                    // Apply category filter
+                    if (category) {
+                        keywordQuery = keywordQuery.ilike('target_muscle', `%${category}%`);
+                    }
+
+                    const { data: keywordResults } = await keywordQuery.limit(limit || 20);
+
+                    if (keywordResults && keywordResults.length > 0) {
+                        return (this as any).formatSemanticResults(query, keywordResults.map((ex: any) => ({
+                            ...ex,
+                            similarity: 0.4 // Default similarity for keyword matches
+                        })), equipment, category, preferCompound);
+                    }
+
+                    return {
+                        query,
+                        results: [],
+                        message: 'No exercises found. Try broader terms or remove equipment filters.'
+                    };
+                }
+
+                // Use fallback results
+                return this.formatSemanticResults(query, fallbackResults, equipment, category, preferCompound);
+            }
+
+            return this.formatSemanticResults(query, results, equipment, category, preferCompound);
+
+        } catch (error: any) {
+            console.error('[searchExercisesSemantic] Error:', error);
+            console.log('[searchExercisesSemantic] Attempting basic database search as fallback...');
+
+            // Emergency fallback: basic database search
+            try {
+                let fallbackQuery = supabase
+                    .from('exercises')
+                    .select('id, name, description, target_muscle, equipment_needed, muscle_groups, difficulty, is_compound')
+                    .order('name');
+
+                // Apply equipment filter if provided
+                if (equipment && equipment.length > 0) {
+                    fallbackQuery = fallbackQuery.overlaps('equipment_needed', equipment);
+                }
+
+                // Apply category filter if provided  
+                if (category) {
+                    fallbackQuery = fallbackQuery.ilike('target_muscle', `%${category}%`);
+                }
+
+                const { data: fallbackResults } = await fallbackQuery.limit(limit || 20);
+
+                if (fallbackResults && fallbackResults.length > 0) {
+                    console.log(`[searchExercisesSemantic] Fallback found ${fallbackResults.length} exercises`);
+                    return {
+                        query,
+                        count: fallbackResults.length,
+                        results: fallbackResults.map((ex: any) => ({
+                            id: ex.id,
+                            exercise_id: ex.id,
+                            name: ex.name,
+                            exercise_name: ex.name,
+                            description: ex.description?.substring(0, 150),
+                            category: ex.target_muscle,
+                            equipment: ex.equipment_needed,
+                            muscles: ex.muscle_groups,
+                            difficulty: ex.difficulty,
+                            is_compound: ex.is_compound,
+                            match_score: 0.5 // Default score for fallback
+                        })),
+                        message: `Found ${fallbackResults.length} exercises (fallback search)`,
+                        source: 'basic_fallback'
+                    };
+                }
+            } catch (fallbackError) {
+                console.error('[searchExercisesSemantic] Fallback also failed:', fallbackError);
+            }
+
+            // If everything fails
+            return {
+                error: 'Exercise search system is temporarily unavailable.',
+                details: error.message,
+                suggestion: 'The database may be updating. Please try again in a few minutes.'
+            };
+        }
+    },
+
+    /**
+     * Helper to format semantic search results
+     */
+    formatSemanticResults(query: string, rawResults: any[], equipment?: string[], category?: string, preferCompound?: boolean) {
+        console.log(`[formatSemanticResults] Got ${rawResults.length} results for "${query}"`);
+
+        const formatted = rawResults.map(ex => ({
+            id: ex.id,
+            exercise_id: ex.id,
+            name: ex.name,
+            exercise_name: ex.name,
+            description: ex.description?.substring(0, 150),
+            category: ex.category,
+            equipment: ex.equipment_needed,
+            muscles: ex.muscle_groups,
+            difficulty: ex.difficulty,
+            is_compound: ex.is_compound,
+            match_score: Math.round((ex.similarity * 0.7 + (ex.quality_score || 0) * 0.1) * 100) / 100
+        }));
+
+        return {
+            query,
+            count: formatted.length,
+            results: formatted,
+            filters_applied: {
+                equipment: equipment || 'any',
+                category: category || 'any',
+                prefer_compound: preferCompound
+            },
+            message: `Found ${formatted.length} exercises matching "${query}"`
+        };
+    },
+
+
+    /**
      * Create a plan proposal for the user to review
      * Returns a structured proposal that the frontend will display as an interactive card
      */
@@ -937,6 +1214,7 @@ export const aiToolsService = {
             day_name: string;
             exercises: Array<{
                 exercise_name: string;
+                exercise_id: string;  // Now required!
                 target_sets: number;
                 target_reps: string;
                 rest_seconds?: number;
@@ -945,10 +1223,42 @@ export const aiToolsService = {
     }) {
         // Validate required fields
         if (!args.name || !args.days || !Array.isArray(args.days)) {
-            return { 
-                success: false, 
-                error: 'Invalid plan structure. Need name and days array.' 
+            return {
+                success: false,
+                error: 'Invalid plan structure. Need name and days array.'
             };
+        }
+
+        // Validate that all exercises have IDs (no hallucination!)
+        const missingIds: string[] = [];
+        const suspiciousIds: string[] = [];
+
+        for (const day of args.days) {
+            for (const ex of day.exercises || []) {
+                if (!ex.exercise_id) {
+                    missingIds.push(ex.exercise_name || 'unnamed');
+                } else if (ex.exercise_id.length < 20 || !ex.exercise_id.includes('-')) {
+                    // Check if ID looks like a proper UUID
+                    suspiciousIds.push(`${ex.exercise_name} (${ex.exercise_id})`);
+                }
+            }
+        }
+
+        if (missingIds.length > 0 || suspiciousIds.length > 0) {
+            const errorParts = [];
+            if (missingIds.length > 0) {
+                errorParts.push(`${missingIds.length} exercises missing exercise_id: [${missingIds.slice(0, 3).join(', ')}${missingIds.length > 3 ? '...' : ''}]`);
+            }
+            if (suspiciousIds.length > 0) {
+                errorParts.push(`${suspiciousIds.length} exercises with invalid IDs: [${suspiciousIds.slice(0, 2).join(', ')}${suspiciousIds.length > 2 ? '...' : ''}]`);
+            }
+
+            throw new Error(
+                `VALIDATION FAILED: ${errorParts.join(' AND ')}. ` +
+                `You MUST call search_exercises first and use valid UUIDs from the results. ` +
+                `Example: search_exercises({query: "${missingIds[0] || 'push exercises'}", equipment: ["Bodyweight"]}) ` +
+                `then use the 'id' field from results as 'exercise_id'.`
+            );
         }
 
         // Return the proposal with a special flag
@@ -965,6 +1275,7 @@ export const aiToolsService = {
                     day_type: (day as any).day_type || 'training', // Default to training
                     exercises: (day.exercises || []).map((ex, exIdx) => ({
                         exercise_name: ex.exercise_name,
+                        exercise_id: ex.exercise_id,
                         target_sets: ex.target_sets || 3,
                         target_reps: ex.target_reps || '8-12',
                         rest_seconds: ex.rest_seconds || 90,

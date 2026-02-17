@@ -67,6 +67,27 @@ export const exerciseService = {
         return data as Exercise;
     },
 
+    async getExerciseByName(name: string): Promise<Exercise | null> {
+        // Try exact match first
+        const { data: exact } = await supabase
+            .from('exercises')
+            .select('*')
+            .ilike('name', name)
+            .maybeSingle();
+
+        if (exact) return exact as Exercise;
+
+        // Try fuzzy ilike (contains)
+        const { data: fuzzy } = await supabase
+            .from('exercises')
+            .select('*')
+            .ilike('name', `%${name}%`)
+            .limit(1)
+            .maybeSingle();
+
+        return fuzzy as Exercise || null;
+    },
+
     async getExerciseProgress(userId: string, exerciseId: string, weeks: number = 12) {
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - (weeks * 7));

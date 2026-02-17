@@ -113,24 +113,24 @@ export const plannerService = {
     async deactivateCurrentPlan(userId: string, archiveReason: 'ai_update' | 'user_archived' | 'replaced' = 'replaced') {
         // Archive the current active plan instead of just deactivating
         // First try with archive columns, fallback to just is_active if migration not run
-        const { error } = await (supabase
-            .from('workout_plans')
-            .update({ 
+        const { error } = await ((supabase
+            .from('workout_plans') as any)
+            .update({
                 is_active: false,
                 is_archived: true,
                 archived_at: new Date().toISOString(),
                 archive_reason: archiveReason
-            } as any)
+            })
             .eq('user_id', userId)
-            .eq('is_active', true) as any);
-        
+            .eq('is_active', true));
+
         // If archive columns don't exist, just deactivate
         if (error?.code === '42703') {
-            await (supabase
-                .from('workout_plans')
-                .update({ is_active: false } as any)
+            await ((supabase
+                .from('workout_plans') as any)
+                .update({ is_active: false })
                 .eq('user_id', userId)
-                .eq('is_active', true) as any);
+                .eq('is_active', true));
         }
     },
 
@@ -199,14 +199,14 @@ export const plannerService = {
 
     async updatePlan(planId: string, planData: CreatePlanDTO) {
         // 1. Update top-level plan details
-        const { error: planError } = await (supabase
-            .from('workout_plans')
+        const { error: planError } = await ((supabase
+            .from('workout_plans') as any)
             .update({
                 name: planData.name,
                 description: planData.description,
                 duration_weeks: planData.duration_weeks
-            } as any)
-            .eq('id', planId) as any);
+            })
+            .eq('id', planId));
 
         if (planError) throw planError;
 
@@ -237,13 +237,13 @@ export const plannerService = {
 
             if (dayId) {
                 // Update existing day
-                await supabase
-                    .from('plan_days')
+                await (supabase
+                    .from('plan_days') as any)
                     .update({
                         day_name: day.day_name,
                         day_type: day.day_type,
                         notes: day.notes
-                    } as any)
+                    })
                     .eq('id', dayId);
             } else {
                 // Insert new day
@@ -288,9 +288,9 @@ export const plannerService = {
                     notes: ex.notes
                 }));
 
-                const { error: exError } = await (supabase
-                    .from('plan_exercises')
-                    .insert(exercisesToInsert as any) as any);
+                const { error: exError } = await ((supabase
+                    .from('plan_exercises') as any)
+                    .insert(exercisesToInsert));
 
                 if (exError) throw exError;
             }
@@ -316,11 +316,7 @@ export const plannerService = {
             (data as any)!.exercises.sort((a: any, b: any) => a.order_in_workout - b.order_in_workout);
         }
 
-        return data as PlanDay & {
-            exercises: (PlanExercise & {
-                exercise: Database['public']['Tables']['exercises']['Row'] | null;
-            })[];
-        };
+        return data as any;
     },
     async deletePlan(planId: string) {
         // Try to delete, but if there are completed workouts referencing this plan,
@@ -333,10 +329,10 @@ export const plannerService = {
         if (error) {
             // If foreign key constraint error, deactivate instead
             if (error.code === '23503') {
-                const { error: updateError } = await (supabase
-                    .from('workout_plans')
-                    .update({ is_active: false } as any)
-                    .eq('id', planId) as any);
+                const { error: updateError } = await ((supabase
+                    .from('workout_plans') as any)
+                    .update({ is_active: false })
+                    .eq('id', planId));
 
                 if (updateError) throw updateError;
                 return; // Successfully deactivated
@@ -410,7 +406,7 @@ export const plannerService = {
             return (data || []).map((plan: any) => ({
                 ...plan,
                 days_count: plan.days?.length || 0,
-                exercises_count: plan.days?.reduce((sum: number, day: any) => 
+                exercises_count: plan.days?.reduce((sum: number, day: any) =>
                     sum + (day.exercises?.length || 0), 0) || 0,
                 days: undefined // Remove days array to keep response light
             }));
@@ -424,15 +420,15 @@ export const plannerService = {
      * Archive the current active plan manually
      */
     async archivePlan(planId: string, reason: 'ai_update' | 'user_archived' | 'replaced' = 'user_archived') {
-        const { error } = await (supabase
-            .from('workout_plans')
+        const { error } = await ((supabase
+            .from('workout_plans') as any)
             .update({
                 is_active: false,
                 is_archived: true,
                 archived_at: new Date().toISOString(),
                 archive_reason: reason
-            } as any)
-            .eq('id', planId) as any);
+            })
+            .eq('id', planId));
 
         if (error) throw error;
     },
@@ -446,15 +442,15 @@ export const plannerService = {
         await this.deactivateCurrentPlan(userId, 'replaced');
 
         // Then restore the selected plan
-        const { error } = await (supabase
-            .from('workout_plans')
+        const { error } = await ((supabase
+            .from('workout_plans') as any)
             .update({
                 is_active: true,
                 is_archived: false,
                 archived_at: null,
                 archive_reason: null
-            } as any)
-            .eq('id', planId) as any);
+            })
+            .eq('id', planId));
 
         if (error) throw error;
     },
@@ -499,13 +495,13 @@ export const plannerService = {
         if (error) {
             // If there are completed workouts referencing this plan, just mark it deleted
             if (error.code === '23503') {
-                await (supabase
-                    .from('workout_plans')
-                    .update({ 
+                await ((supabase
+                    .from('workout_plans') as any)
+                    .update({
                         name: `[Deleted] ${new Date().toISOString().split('T')[0]}`,
                         is_archived: true
-                    } as any)
-                    .eq('id', planId) as any);
+                    })
+                    .eq('id', planId));
                 return;
             }
             throw error;

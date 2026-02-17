@@ -1,5 +1,6 @@
 import { generateGeminiContent } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
+import { CoachFactory } from '@/patterns/factory/CoachFactory';
 import { CreatePlanDTO, plannerService } from './planner.service';
 import { workoutService } from './workout.service';
 
@@ -135,7 +136,7 @@ export const aiService = {
         return plannerService.getActivePlan(userId);
     },
 
-    async analyzeWorkout(userId: string, workoutData: any) {
+    async analyzeWorkout(userId: string, workoutData: any, coachType: 'analytic' | 'motivational' = 'analytic') {
         // 1. Get user profile
         const { data: profileData } = await supabase
             .from('profiles')
@@ -147,90 +148,53 @@ export const aiService = {
 
         // 2. Get previous workout history for comparison
         const recentHistory = await workoutService.getDetailedRecentHistory(userId, 3);
-        
+
         // 3. Calculate current workout metrics
         const currentVolume = workoutData.exercises.reduce((total: number, ex: any) => {
             return total + ex.sets.reduce((exTotal: number, set: any) => {
                 return set.is_completed ? exTotal + (set.weight_kg * set.reps) : exTotal;
             }, 0);
         }, 0);
-        
+
         const completedSets = workoutData.exercises.reduce((total: number, ex: any) => {
             return total + ex.sets.filter((s: any) => s.is_completed).length;
         }, 0);
-        
+
+        // Enrich workoutData for the coach
+        const enrichedWorkoutData = {
+            ...workoutData,
+            totalVolume: currentVolume,
+            completedSets: completedSets
+        };
+
         // 4. Find comparison with similar workout from history
         let previousComparison = null;
         if (recentHistory.length > 0) {
-            const lastWorkout = recentHistory[0];
+            const lastWorkout = recentHistory[0] as any;
             const lastVolume = lastWorkout.workout_exercises?.reduce((total: number, ex: any) => {
                 return total + (ex.sets?.reduce((setTotal: number, set: any) => {
                     return setTotal + (set.weight_kg * set.reps);
                 }, 0) || 0);
             }, 0) || 0;
-            
+
             const volumeChange = currentVolume - lastVolume;
             const volumeChangePercent = lastVolume > 0 ? ((volumeChange / lastVolume) * 100).toFixed(1) : '0';
-            
+
             previousComparison = {
-                lastDate: new Date(lastWorkout.completed_at).toLocaleDateString(),
+                lastDate: new Date((lastWorkout as any).completed_at).toLocaleDateString(),
                 volumeChange,
                 volumeChangePercent,
                 lastVolume
             };
         }
 
-        // 5. Format workout data for analysis
-        const workoutSummary = workoutData.exercises.map((ex: any) => {
-            const completedSets = ex.sets.filter((s: any) => s.is_completed);
-            if (completedSets.length === 0) return null;
-
-            const totalVolume = completedSets.reduce((sum: number, s: any) => sum + (s.weight_kg * s.reps), 0);
-            const avgWeight = totalVolume > 0 ? (completedSets.reduce((sum: number, s: any) => sum + s.weight_kg, 0) / completedSets.length).toFixed(1) : '0';
-            
-            return `${ex.name}: ${completedSets.length} sets, avg ${avgWeight}kg, ${totalVolume}kg total volume`;
-        }).filter(Boolean).join('\n');
-
-        const prompt = `
-You are a data-driven fitness coach. Analyze this workout using only the provided data.
-
-CURRENT WORKOUT:
-Name: ${workoutData.name}
-Duration: ${workoutData.durationMinutes} minutes  
-Total Volume: ${currentVolume}kg
-Completed Sets: ${completedSets}
-Exercises:
-${workoutSummary}
-
-${previousComparison ? `COMPARISON TO LAST SESSION (${previousComparison.lastDate}):
-Last Volume: ${previousComparison.lastVolume}kg
-Volume Change: ${previousComparison.volumeChange > 0 ? '+' : ''}${previousComparison.volumeChange}kg (${previousComparison.volumeChangePercent}%)` : 'FIRST RECORDED SESSION - No comparison data available.'}
-
-USER GOAL: ${profile?.primary_goal || 'General Fitness'}
-
-Provide exactly 3 sections:
-
-1) POSITIVE INSIGHT: One specific achievement from today's numbers (volume, sets, consistency, or duration)
-2) COMPARISON: How today compared to previous session (if available) or note this is baseline session  
-3) NEXT SESSION: One concrete recommendation with specific exercise or action
-
-Rules:
-- Be factual and data-focused
-- No motivational fluff or general fitness advice
-- Keep each section to 1-2 sentences max
-- Use the actual numbers provided
-
-Return ONLY valid JSON:
-{
-  "positive_insight": "specific data-based achievement",
-  "comparison": "factual comparison or baseline note", 
-  "next_session": "concrete specific recommendation"
-}
-        `;
+        // 5. USE FACTORY PATTERN to get the appropriate coach
+        const coach = CoachFactory.createCoach(coachType);
+        const { systemInstruction, userPrompt } = coach.getAnalysisPrompt(enrichedWorkoutData, profile, previousComparison);
 
         const responseText = await generateGeminiContent(
-            [{ role: 'user', parts: [{ text: prompt }] }],
-            "You are a JSON-only response bot. Do not use markdown blocks."
+            [{ role: 'user', parts: [{ text: userPrompt }] }],
+            systemInstruction + " You are a JSON-only response bot. Do not use markdown blocks."
         );
 
         try {
@@ -240,7 +204,7 @@ Return ONLY valid JSON:
             console.error("AI returned invalid JSON for analysis:", responseText);
             return {
                 positive_insight: `Completed ${completedSets} sets with ${currentVolume}kg total volume`,
-                comparison: previousComparison ? 
+                comparison: previousComparison ?
                     `${previousComparison.volumeChange > 0 ? 'Increased' : 'Decreased'} volume by ${Math.abs(previousComparison.volumeChange)}kg vs last session` :
                     "Baseline session recorded - future workouts will compare to this",
                 next_session: "Focus on progressive overload by adding 2.5-5kg to your strongest exercise"

@@ -35,6 +35,31 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
         setDisplayValue(value);
     }, [value]);
 
+    // Define handlePress before using it
+    const handlePress = useCallback((key: string) => {
+        Haptics.selectionAsync();
+        let newValue: string;
+
+        if (key === 'backspace') {
+            newValue = displayValue.slice(0, -1);
+        } else if (key === '.') {
+            if (!displayValue.includes('.')) {
+                newValue = displayValue === '' ? '0.' : displayValue + '.';
+            } else {
+                return; // Already has decimal
+            }
+        } else {
+            if (displayValue.length < 8) {
+                newValue = displayValue === '0' ? key : displayValue + key;
+            } else {
+                return; // Max length
+            }
+        }
+
+        setDisplayValue(newValue);
+        onChange(newValue);
+    }, [displayValue, onChange]);
+
     // Handle physical keyboard input on Web
     useEffect(() => {
         if (Platform.OS === 'web' && visible) {
@@ -59,30 +84,6 @@ export const NotebookInput: React.FC<NotebookInputProps> = ({
     }, [visible, handlePress, onNext]);
 
     if (!visible) return null;
-
-    const handlePress = useCallback((key: string) => {
-        Haptics.selectionAsync();
-        let newValue: string;
-
-        if (key === 'backspace') {
-            newValue = displayValue.slice(0, -1);
-        } else if (key === '.') {
-            if (!displayValue.includes('.')) {
-                newValue = displayValue === '' ? '0.' : displayValue + '.';
-            } else {
-                return; // Already has decimal
-            }
-        } else {
-            if (displayValue.length < 8) {
-                newValue = displayValue === '0' ? key : displayValue + key;
-            } else {
-                return; // Max length
-            }
-        }
-
-        setDisplayValue(newValue); // Instant UI update
-        onChange(newValue); // Notify parent
-    }, [displayValue, onChange]);
 
     const adjust = useCallback((delta: number) => {
         Haptics.selectionAsync();

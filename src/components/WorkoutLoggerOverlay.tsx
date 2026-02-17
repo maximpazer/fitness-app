@@ -95,7 +95,7 @@ export const WorkoutLoggerOverlay = () => {
     }, [activeWorkout]);
 
     // Debounce timer for syncing local input to context
-    const syncTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Cleanup sync timer on unmount
     useEffect(() => {
@@ -391,7 +391,7 @@ export const WorkoutLoggerOverlay = () => {
     };
 
     const getFocusedLabel = useCallback(() => {
-        if (!focusedField) return '';
+        if (!focusedField || !activeWorkout) return '';
         const { exIdx, setIdx, field } = focusedField;
         return `${activeWorkout.exercises[exIdx]?.name} • S${setIdx + 1} • ${field}`;
     }, [focusedField, activeWorkout]);
@@ -583,58 +583,3 @@ export const WorkoutLoggerOverlay = () => {
     );
 };
 
-// Session-level Rest Bar
-const SessionRestBar = ({ visible, startTime, duration, onSkip }: { visible: boolean, startTime: number | null, duration: number, onSkip: () => void }) => {
-    const [timeLeft, setTimeLeft] = useState(duration);
-    const height = useSharedValue(0);
-
-    useEffect(() => {
-        height.value = withTiming(visible ? 48 : 0, { duration: 300 });
-    }, [visible]);
-
-    useEffect(() => {
-        if (!visible || !startTime) {
-            setTimeLeft(duration);
-            return;
-        }
-        const interval = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            const remaining = Math.max(0, duration - elapsed);
-            setTimeLeft(remaining);
-            if (remaining === 0) {
-                // Trigger Medium Haptic
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                onSkip();
-            }
-        }, 500);
-        return () => clearInterval(interval);
-    }, [visible, startTime, duration]);
-
-    const animatedStyle = useAnimatedStyle(() => ({
-        height: height.value,
-        opacity: height.value > 0 ? 1 : 0,
-        overflow: 'hidden'
-    }));
-
-    if (!visible) return null;
-
-    const m = Math.floor(timeLeft / 60);
-    const s = timeLeft % 60;
-
-    return (
-        <Animated.View style={animatedStyle} className="bg-blue-600/10 border-b border-blue-500/20">
-            <View className="flex-1 flex-row items-center justify-between px-4">
-                <View className="flex-row items-center">
-                    <Ionicons name="timer" size={18} color="#3b82f6" />
-                    <Text className="text-blue-500 font-bold ml-2 text-xs uppercase tracking-widest">Resting</Text>
-                </View>
-                <View className="flex-row items-center gap-6">
-                    <Text className="text-white font-mono font-black text-lg">{m}:{s < 10 ? '0' : ''}{s}</Text>
-                    <TouchableOpacity onPress={onSkip} className="bg-blue-500/20 px-3 py-1 rounded-full border border-blue-500/30">
-                        <Text className="text-blue-400 text-[10px] font-black uppercase">Skip</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </Animated.View>
-    );
-};

@@ -40,6 +40,7 @@ export interface OpenAIResponse {
         args: Record<string, any>;
     };
     finishReason?: string;
+    error?: string;
 }
 
 // Convert Gemini-style messages to OpenAI format
@@ -144,7 +145,8 @@ export async function generateOpenAIContentWithTools(
         model: 'gpt-4o-mini', // Cost-effective model with function calling
         messages,
         temperature: 0.7,
-        max_tokens: 1024,
+        max_tokens: 2048, // Increased for comprehensive workout plans
+        stream: false, // Disable streaming to ensure complete responses
     };
 
     if (tools && tools.length > 0) {
@@ -152,7 +154,8 @@ export async function generateOpenAIContentWithTools(
         body.tool_choice = 'auto'; // Let the model decide when to use tools
     }
 
-    if (__DEV__) console.log('[OpenAI] Sending request with', messages.length, 'messages');
+    const isDev = typeof __DEV__ !== 'undefined' ? (global as any).__DEV__ : false;
+    if (isDev) console.log('[OpenAI] Sending request with', messages.length, 'messages');
 
     const response = await fetch(API_URL, {
         method: 'POST',
@@ -169,7 +172,24 @@ export async function generateOpenAIContentWithTools(
         throw new Error(errorData.error?.message || 'Failed to fetch from OpenAI');
     }
 
-    const data = await response.json();
+    const responseText = await response.text();
+    if (!responseText || responseText.trim() === '') {
+        console.error('[OpenAI] Empty response received');
+        throw new Error('Empty response from OpenAI API');
+    }
+
+    let data;
+    try {
+        data = JSON.parse(responseText);
+    } catch (parseError: any) {
+        console.error('[OpenAI] Failed to parse API response:', {
+            parseError: parseError.message,
+            responseLength: responseText.length,
+            responsePreview: responseText.substring(0, 500) + '...'
+        });
+        throw new Error(`OpenAI API returned malformed JSON: ${parseError.message}`);
+    }
+
     const choice = data.choices?.[0];
     const message = choice?.message;
     const finishReason = choice?.finish_reason;
@@ -177,13 +197,34 @@ export async function generateOpenAIContentWithTools(
     // Check for function/tool call
     if (message?.tool_calls && message.tool_calls.length > 0) {
         const toolCall = message.tool_calls[0];
-        return {
-            functionCall: {
-                name: toolCall.function.name,
-                args: JSON.parse(toolCall.function.arguments || '{}'),
-            },
-            finishReason,
-        };
+        try {
+            const args = JSON.parse(toolCall.function.arguments || '{}');
+            return {
+                functionCall: {
+                    name: toolCall.function.name,
+                    args,
+                },
+                finishReason,
+            };
+        } catch (parseError: any) {
+            console.error('[OpenAI] Failed to parse tool call arguments:', {
+                functionName: toolCall.function.name,
+                rawArguments: toolCall.function.arguments,
+                parseError: parseError.message,
+                argumentsLength: toolCall.function.arguments?.length || 0,
+                argumentsPreview: toolCall.function.arguments?.substring(0, 200) + '...'
+            });
+
+            // Try to recover by using empty args
+            return {
+                functionCall: {
+                    name: toolCall.function.name,
+                    args: {},
+                },
+                finishReason,
+                error: `JSON parse failed: ${parseError.message}`,
+            };
+        }
     }
 
     // Return text response

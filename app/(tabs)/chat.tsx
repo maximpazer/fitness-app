@@ -48,12 +48,12 @@ const MarkdownText = ({ text, style, isUser }: { text: string, style: any, isUse
         <View>
             {lines.map((line, i) => {
                 const trimmedLine = line.trim();
-                
+
                 // Handle headers (###, ##, #)
                 const h3Match = trimmedLine.match(/^###\s*(.*)/);
                 const h2Match = trimmedLine.match(/^##\s*(.*)/);
                 const h1Match = trimmedLine.match(/^#\s*(.*)/);
-                
+
                 if (h3Match) {
                     return (
                         <Text key={i} className={`font-bold text-base mb-2 mt-3 ${isUser ? 'text-white' : 'text-gray-200'}`}>
@@ -75,7 +75,7 @@ const MarkdownText = ({ text, style, isUser }: { text: string, style: any, isUse
                         </Text>
                     );
                 }
-                
+
                 // Handle numbered lists (1. 2. etc)
                 const numberedMatch = trimmedLine.match(/^(\d+)\.\s*(.*)/);
                 if (numberedMatch) {
@@ -95,7 +95,7 @@ const MarkdownText = ({ text, style, isUser }: { text: string, style: any, isUse
                         </View>
                     );
                 }
-                
+
                 // Handle bullets
                 const isBullet = trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ');
                 const cleanLine = isBullet ? trimmedLine.substring(2) : line;
@@ -146,7 +146,7 @@ const QUICK_ACTIONS: QuickAction[] = [
 // Insight card component
 const InsightCard = ({ insight, onDismiss }: { insight: AutoInsight; onDismiss: () => void }) => {
     const fadeAnim = useRef(new Animated.Value(0)).current;
-    
+
     useEffect(() => {
         Animated.timing(fadeAnim, {
             toValue: 1,
@@ -154,7 +154,7 @@ const InsightCard = ({ insight, onDismiss }: { insight: AutoInsight; onDismiss: 
             useNativeDriver: true,
         }).start();
     }, []);
-    
+
     const bgColors: Record<string, string> = {
         volume: 'bg-blue-600/20',
         frequency: 'bg-purple-600/20',
@@ -163,7 +163,7 @@ const InsightCard = ({ insight, onDismiss }: { insight: AutoInsight; onDismiss: 
         streak: 'bg-emerald-600/20',
         pr: 'bg-yellow-600/20'
     };
-    
+
     const borderColors: Record<string, string> = {
         volume: 'border-blue-500/40',
         frequency: 'border-purple-500/40',
@@ -172,7 +172,7 @@ const InsightCard = ({ insight, onDismiss }: { insight: AutoInsight; onDismiss: 
         streak: 'border-emerald-500/40',
         pr: 'border-yellow-500/40'
     };
-    
+
     return (
         <Animated.View style={{ opacity: fadeAnim }} className={`mx-4 mb-4 p-4 rounded-2xl ${bgColors[insight.type]} border ${borderColors[insight.type]}`}>
             <View className="flex-row items-start">
@@ -205,7 +205,7 @@ export default function Chat() {
     const [showQuickActions, setShowQuickActions] = useState(true);
     const flatListRef = useRef<FlatList>(null);
     const { mode } = useLocalSearchParams();
-    
+
     // Tab bar height (approximate for iOS with safe area)
     const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 88 : 60;
 
@@ -220,9 +220,9 @@ export default function Chat() {
     // Normalize plan proposal to handle different LLM output formats
     const normalizeProposal = (p: any): any => {
         if (!p) return null;
-        
+
         let normalizedDays = p.days;
-        
+
         // Handle object-style days (OpenAI sometimes returns {"Push": {...}, "Pull": {...}})
         if (p.days && typeof p.days === 'object' && !Array.isArray(p.days)) {
             normalizedDays = Object.entries(p.days).map(([dayName, dayData]: [string, any], index) => ({
@@ -232,27 +232,28 @@ export default function Chat() {
                 exercises: dayData.exercises || []
             }));
         }
-        
+
         // Validate we now have an array
         if (!Array.isArray(normalizedDays) || normalizedDays.length === 0) {
             console.warn('[Plan] Could not normalize proposal days:', p);
             return null;
         }
-        
+
         // Ensure required fields have defaults
-        return { 
-            ...p, 
+        return {
+            ...p,
             days: normalizedDays,
             duration_weeks: p.duration_weeks || 8, // Default to 8 weeks if not specified
             description: p.description || `${p.name || 'Custom'} training plan`
         };
     };
 
-    // Async function to map canonical names to actual exercises
-    const mapProposalExercisesAsync = async (p: any): Promise<any> => {
+    // Async function to map exercise UUIDs to actual exercises
+    // strictMode = true: Only accept exercises with valid IDs (no fuzzy matching)
+    const mapProposalExercisesAsync = async (p: any, strictMode: boolean = true): Promise<any> => {
         const normalized = normalizeProposal(p);
         if (!normalized) return null;
-        
+
         // Helper to parse rep range string into min/max
         const parseReps = (repsStr: string): { min: number; max: number } => {
             if (!repsStr) return { min: 8, max: 12 };
@@ -264,40 +265,59 @@ export default function Chat() {
             if (!isNaN(num)) return { min: num, max: num };
             return { min: 8, max: 12 };
         };
-        
-        // Collect all canonical names from the proposal
-        const allCanonicalNames: string[] = [];
-        for (const day of normalized.days) {
-            if (Array.isArray(day.exercises)) {
-                for (const ex of day.exercises) {
-                    const name = ex.exercise_name || ex.name;
-                    if (name) allCanonicalNames.push(name);
+
+        // Check if we have exercise_id UUIDs (new workflow) or need fallback mapping
+        const hasExerciseIds = normalized.days.some((day: any) =>
+            Array.isArray(day.exercises) && day.exercises.some((ex: any) => 
+                ex.exercise_id && ex.exercise_id.length > 20 && ex.exercise_id.includes('-')
+            )
+        );
+
+        let variantMap = new Map();
+
+        // Only use canonical system if we don't have UUIDs (legacy fallback)
+        if (!hasExerciseIds && !strictMode) {
+            // Collect all canonical names from the proposal  
+            const allCanonicalNames: string[] = [];
+            for (const day of normalized.days) {
+                if (Array.isArray(day.exercises)) {
+                    for (const ex of day.exercises) {
+                        const name = ex.exercise_name || ex.name;
+                        if (name) allCanonicalNames.push(name);
+                    }
+                }
+            }
+
+            if (allCanonicalNames.length > 0) {
+                // Get user equipment from profile
+                const userEquipment = metadata?.profile?.available_equipment || [];
+                const userDifficulty = metadata?.profile?.fitness_level || 'intermediate';
+
+                try {
+                    // Batch fetch all variants at once (efficient!)
+                    variantMap = await canonicalExerciseService.selectVariantsBatch(
+                        allCanonicalNames,
+                        userEquipment,
+                        userDifficulty
+                    );
+                } catch (error) {
+                    console.warn('[Plan] Canonical mapping failed, using fallback:', error);
+                    variantMap = new Map();
                 }
             }
         }
-        
-        // Get user equipment from profile
-        const userEquipment = metadata?.profile?.available_equipment || [];
-        const userDifficulty = metadata?.profile?.fitness_level || 'intermediate';
-        
-        // Batch fetch all variants at once (efficient!)
-        const variantMap = await canonicalExerciseService.selectVariantsBatch(
-            allCanonicalNames,
-            userEquipment,
-            userDifficulty
-        );
-        
+
         // Also keep the old fuzzy matcher as fallback (for backward compatibility)
         const exercises = metadata?.exercises || [];
         const findExerciseFallback = (searchName: string) => {
             const normalizedSearch = searchName.toLowerCase().replace(/[-_]/g, ' ').trim();
             const searchWords = normalizedSearch.split(' ').filter(w => w.length > 2);
-            
-            let found = exercises.find((e: any) => 
+
+            let found = exercises.find((e: any) =>
                 e.name.toLowerCase().replace(/[-_]/g, ' ').trim() === normalizedSearch
             );
             if (found) return found;
-            
+
             // Word-based matching
             let bestMatch: any = null;
             let bestScore = 0;
@@ -312,40 +332,61 @@ export default function Chat() {
                     if (score > bestScore) { bestScore = score; bestMatch = ex; }
                 }
             }
-            if (bestMatch && bestScore >= 0.5) return bestMatch;
-            return null;
+            return bestMatch || null;
         };
-        
-        // Map each day's exercises
-        const mappedDays = normalized.days.map((day: any) => ({
-            ...day,
-            day_type: day.day_type || 'training',
-            exercises: Array.isArray(day.exercises) ? day.exercises.map((ex: any, index: number) => {
-                // If already has valid UUID, keep it
+
+        const mappedDays = await Promise.all(normalized.days.map(async (day: any) => {
+            const exercises = await Promise.all((day.exercises || []).map(async (ex: any, index: number) => {
+                // 1. If ID is provided, VALIDATE IT (this is the expected path!)
                 if (ex.exercise_id && ex.exercise_id.length > 20) {
-                    const reps = parseReps(ex.target_reps || '8-12');
-                    return { 
-                        ...ex, 
-                        order_in_workout: ex.order_in_workout ?? index + 1,
-                        target_sets: ex.target_sets || 3,
-                        target_reps_min: reps.min,
-                        target_reps_max: reps.max,
-                        rest_seconds: ex.rest_seconds || 90
-                    };
+                    // Quick check: is it in local metadata or can we find it in DB?
+                    const isLocal = metadata?.exercises?.some((e: any) => e.id === ex.exercise_id);
+                    let dbMatch = null;
+                    if (!isLocal) {
+                        try {
+                            dbMatch = await exerciseService.getExerciseById(ex.exercise_id);
+                        } catch (e) {
+                            if (__DEV__) console.warn(`[Plan] AI provided invalid exercise_id: ${ex.exercise_id}`);
+                        }
+                    }
+
+                    if (isLocal || dbMatch) {
+                        const reps = parseReps(ex.target_reps || '8-12');
+                        const finalName = ex.exercise_name || ex.name || (isLocal
+                            ? (metadata?.exercises?.find((e: any) => e.id === ex.exercise_id)?.name || "Exercise")
+                            : (dbMatch?.name || "Exercise"));
+
+                        return {
+                            ...ex,
+                            exercise_id: ex.exercise_id,
+                            exercise_name: finalName,
+                            order_in_workout: ex.order_in_workout ?? index + 1,
+                            target_sets: ex.target_sets || 3,
+                            target_reps_min: reps.min,
+                            target_reps_max: reps.max,
+                            rest_seconds: ex.rest_seconds || 90
+                        };
+                    }
                 }
-                
+
                 const name = ex.exercise_name || ex.name;
                 if (!name) return null;
-                
-                // Try canonical lookup first
+
+                // STRICT MODE: If AI should have searched, reject exercises without valid IDs
+                if (strictMode) {
+                    if (__DEV__) console.warn(`[Plan] STRICT: Rejecting "${name}" - no valid exercise_id from search`);
+                    return null; // Skip this exercise entirely
+                }
+
+                // NON-STRICT MODE ONLY: Fallback matching (legacy support)
+                // 2. Canonical lookup
                 const variant = variantMap.get(name);
                 if (variant) {
-                    if (__DEV__) console.log(`[Plan] Canonical: "${name}" -> "${variant.name}"`);
                     const reps = parseReps(ex.target_reps || '8-12');
                     return {
                         ...ex,
                         exercise_id: variant.id,
-                        exercise_name: variant.name, // Update to actual variant name
+                        exercise_name: variant.name,
                         order_in_workout: ex.order_in_workout ?? index + 1,
                         target_sets: ex.target_sets || 3,
                         target_reps_min: reps.min,
@@ -353,15 +394,15 @@ export default function Chat() {
                         rest_seconds: ex.rest_seconds || 90
                     };
                 }
-                
-                // Fallback to fuzzy matching (for old proposals or edge cases)
+
+                // 3. Fuzzy local search
                 const found = findExerciseFallback(name);
                 if (found) {
-                    if (__DEV__) console.log(`[Plan] Fallback match: "${name}" -> "${found.name}"`);
                     const reps = parseReps(ex.target_reps || '8-12');
                     return {
                         ...ex,
                         exercise_id: found.id,
+                        exercise_name: found.name,
                         order_in_workout: ex.order_in_workout ?? index + 1,
                         target_sets: ex.target_sets || 3,
                         target_reps_min: reps.min,
@@ -369,12 +410,38 @@ export default function Chat() {
                         rest_seconds: ex.rest_seconds || 90
                     };
                 }
-                
-                console.warn(`[Plan] Could not map exercise: "${name}"`);
-                return null;
-            }).filter(Boolean) : []
+
+                // 4. Final database fallback
+                const dbMatch = await exerciseService.getExerciseByName(name);
+                if (dbMatch) {
+                    const reps = parseReps(ex.target_reps || '8-12');
+                    return {
+                        ...ex,
+                        exercise_id: dbMatch.id,
+                        exercise_name: dbMatch.name,
+                        order_in_workout: ex.order_in_workout ?? index + 1,
+                        target_sets: ex.target_sets || 3,
+                        target_reps_min: reps.min,
+                        target_reps_max: reps.max,
+                        rest_seconds: ex.rest_seconds || 90
+                    };
+                }
+
+                // 5. Unmapped fallback
+                return {
+                    ...ex,
+                    exercise_name: name,
+                    _unmapped: true
+                };
+            }));
+
+            return {
+                ...day,
+                day_type: day.day_type || 'training',
+                exercises: (exercises || []).filter(Boolean)
+            };
         }));
-        
+
         return { ...normalized, days: mappedDays };
     };
 
@@ -382,7 +449,7 @@ export default function Chat() {
     const mapProposalExercises = (p: any) => {
         const normalized = normalizeProposal(p);
         if (!normalized) return null;
-        
+
         // For sync usage, just return normalized with placeholder IDs
         // Real mapping happens in acceptPlan via mapProposalExercisesAsync
         return {
@@ -407,7 +474,7 @@ export default function Chat() {
             ]);
             setShowQuickActions(false);
         }
-    }, [mode]);
+    }, [mode, messages.length]);
 
     // Generate auto insight from user data
     const generateAutoInsight = useCallback(async (data: any): Promise<AutoInsight | null> => {
@@ -417,7 +484,7 @@ export default function Chat() {
 
         const insights: AutoInsight[] = [];
         const history = data.detailedHistory;
-        
+
         // 1. Check for volume changes
         if (history.length >= 2) {
             const recentVolumes = history.slice(0, 3).map((w: any) => {
@@ -427,13 +494,13 @@ export default function Chat() {
                     }, 0) || 0);
                 }, 0) || 0;
             });
-            
+
             const avgRecentVolume = recentVolumes.reduce((a: number, b: number) => a + b, 0) / recentVolumes.length;
             const lastVolume = recentVolumes[0];
-            
+
             if (recentVolumes.length >= 2 && avgRecentVolume > 0) {
                 const volumeChange = ((lastVolume - avgRecentVolume) / avgRecentVolume) * 100;
-                
+
                 if (volumeChange < -15) {
                     insights.push({
                         type: 'volume',
@@ -453,18 +520,18 @@ export default function Chat() {
                 }
             }
         }
-        
+
         // 2. Check training frequency this week
         if (data.recentActivity) {
             const thisWeekStart = startOfWeek(new Date());
-            const workoutsThisWeek = history.filter((w: any) => 
+            const workoutsThisWeek = history.filter((w: any) =>
                 new Date(w.completed_at) >= thisWeekStart
             ).length;
-            
+
             const targetDays = data.profile?.training_days_per_week || 4;
             const dayOfWeek = new Date().getDay();
             const expectedByNow = Math.floor((dayOfWeek / 7) * targetDays);
-            
+
             if (workoutsThisWeek < expectedByNow - 1 && dayOfWeek >= 3) {
                 insights.push({
                     type: 'frequency',
@@ -475,11 +542,11 @@ export default function Chat() {
                 });
             }
         }
-        
+
         // 3. Check for exercise plateaus (same weight for 3+ sessions)
         if (history.length >= 3) {
             const exerciseWeights: Map<string, number[]> = new Map();
-            
+
             history.forEach((workout: any) => {
                 workout.workout_exercises?.forEach((ex: any) => {
                     const name = ex.exercise?.name;
@@ -493,7 +560,7 @@ export default function Chat() {
                     }
                 });
             });
-            
+
             for (const [exercise, weights] of exerciseWeights) {
                 if (weights.length >= 3) {
                     const last3 = weights.slice(0, 3);
@@ -510,12 +577,12 @@ export default function Chat() {
                 }
             }
         }
-        
+
         // 4. Check for rest days
         if (history.length > 0) {
             const lastWorkout = new Date(history[0].completed_at);
             const daysSince = Math.floor((new Date().getTime() - lastWorkout.getTime()) / (1000 * 60 * 60 * 24));
-            
+
             if (daysSince >= 3) {
                 insights.push({
                     type: 'rest',
@@ -526,7 +593,7 @@ export default function Chat() {
                 });
             }
         }
-        
+
         // Return a random insight or the most relevant one
         if (insights.length > 0) {
             // Prioritize: plateau > volume > frequency > rest
@@ -536,7 +603,7 @@ export default function Chat() {
             });
             return prioritized[0];
         }
-        
+
         // Default insight if we have data but no specific issues
         if (history.length > 0) {
             const totalWorkouts = history.length;
@@ -547,7 +614,7 @@ export default function Chat() {
                     }, 0) || 0);
                 }, 0) || 0);
             }, 0);
-            
+
             return {
                 type: 'streak',
                 title: 'Training Summary',
@@ -556,7 +623,7 @@ export default function Chat() {
                 color: '#3b82f6'
             };
         }
-        
+
         return null;
     }, []);
 
@@ -579,9 +646,9 @@ export default function Chat() {
                 weightHistory: weightTrend,
                 detailedHistory: detailedHistory
             };
-            
+
             setMetadata(contextData);
-            
+
             // Generate auto insight after loading context
             const insight = await generateAutoInsight(contextData);
             setAutoInsight(insight);
@@ -610,7 +677,7 @@ export default function Chat() {
         try {
             // System prompt for the AI coach - tool-mediated reasoning
             const systemPrompt = `
-You are an expert AI Fitness Coach. You have tools to query summarized user data.
+You are an expert AI Fitness Coach. You have tools to query summarized user data and search for exercises.
 
 AVAILABLE TOOLS:
 - get_recent_workout_summary: Summarized overview (volume, frequency, muscles) for N days
@@ -621,7 +688,7 @@ AVAILABLE TOOLS:
 - compare_workout_periods: Compare this_week vs last_week, etc.
 - get_last_exercise_load: Quick lookup of last weight/reps for exercise
 - get_body_metrics_trend: Body weight trend
-- search_exercises: Search CANONICAL exercises (30 core movements). Returns canonical_name to use in plans.
+- search_exercises: Semantic search across 3200+ exercises. Understands natural language and filters by equipment/category.
 - create_plan_proposal: Create an interactive plan proposal (ONLY when explicitly asked for a plan).
 
 CRITICAL BEHAVIOR RULES:
@@ -631,27 +698,44 @@ CRITICAL BEHAVIOR RULES:
 4. Be concise and coaching-focused.
 
 USER PROFILE: ${JSON.stringify(metadata?.profile || {})}
-USER'S AVAILABLE EQUIPMENT: ${JSON.stringify(metadata?.profile?.available_equipment || ['Barbell', 'Dumbbell', 'Cable', 'Machine'])}
+USER'S AVAILABLE EQUIPMENT: ${JSON.stringify(metadata?.profile?.available_equipment || [])}
 ACTIVE PLAN: ${JSON.stringify(metadata?.activePlan?.name || "No active plan")}
 
-CANONICAL EXERCISE SYSTEM:
-You select from 30 standard exercise types (bench_press, squat, deadlift, etc).
-The system automatically picks the best variant based on user's equipment.
-Example: You say "bench_press" → User with dumbbells gets "Dumbbell Bench Press"
+SEARCH & PLAN CREATION WORKFLOW (CRITICAL - NO EXCEPTIONS):
 
-PLAN CREATION WORKFLOW (ONLY when user asks for a plan):
-1. Do 1-2 exercise searches max (the 30 canonicals cover all common movements)
-2. Call create_plan_proposal with canonical_name for each exercise
-3. For EACH exercise: exercise_name (canonical), target_sets (3-5), target_reps (e.g., "8-12")
-4. Common canonicals: bench_press, squat, deadlift, row, overhead_press, pullup, lat_pulldown, bicep_curl, tricep_extension, lunge, leg_press, leg_curl, hip_thrust, calf_raise, plank
+⚠️ MANDATORY: search_exercises MUST succeed before create_plan_proposal
 
-CANONICAL NAMES (use these exact names):
-- Chest: bench_press, incline_press, chest_fly, dip
-- Back: deadlift, row, pullup, lat_pulldown, cable_row
-- Shoulders: overhead_press, lateral_raise, face_pull
-- Arms: bicep_curl, hammer_curl, tricep_extension, close_grip_press
-- Legs: squat, front_squat, leg_press, lunge, leg_extension, romanian_deadlift, leg_curl, hip_thrust, calf_raise
-- Core: plank, crunch, russian_twist, hanging_leg_raise
+1. User asks for a plan → FIRST call search_exercises (REQUIRED)
+2. search_exercises uses semantic AI to find relevant exercises with valid UUIDs
+3. For COMPLETE workouts, make MULTIPLE searches with descriptive queries:
+   - Search for "chest press exercises" (let semantic search find chest press machines, dumbbells, etc.)
+   - Search for "back row exercises" (finds cable rows, barbell rows, machine rows)
+   - Search for "leg press squat exercises" (finds leg press machines, squats, etc.)
+   - Search for "shoulder press overhead exercises"
+4. Trust the semantic search to find the right exercises - don't over-filter with equipment
+4. If search_exercises returns an error → STOP and ask user to try again later
+5. If search_exercises succeeds → use the returned exercise IDs
+6. create_plan_proposal WILL REJECT any exercise without a valid UUID
+
+EQUIPMENT FILTERS (use intelligently):
+- Only add equipment filter if user specifically mentions equipment type
+- For "bodyweight" or "calisthenics" → equipment: ["Bodyweight"]
+- For "barbell only" → equipment: ["Barbell"]
+- For "dumbbell only" → equipment: ["Dumbbell"]
+- For broad terms like "gym exercises", "machine exercises", "full body" → OMIT equipment filter
+- Available equipment: ["Bodyweight", "Barbell", "Dumbbell", "Cable", "Kettlebell", "Bench (Flat)", "Bench (Incline)", "Weight Plate"]
+- Let semantic search find the right exercises based on the query text
+
+CORRECT FLOW FOR FULL WORKOUTS:
+1. search_exercises({query: "calisthenics push exercises", equipment: ["Bodyweight"], limit: 10})
+2. search_exercises({query: "calisthenics pull exercises", equipment: ["Bodyweight"], limit: 10})
+3. search_exercises({query: "calisthenics leg exercises", equipment: ["Bodyweight"], limit: 10})
+4. Use EXACT IDs from ALL searches in create_plan_proposal
+5. No fallbacks, no made-up names
+
+IF SEARCH FAILS:
+- Tell user: "I'm having trouble accessing the exercise database. Please try again."
+- DO NOT create a plan with made-up exercise names
 
 ALWAYS include target_reps: strength "5-8", hypertrophy "8-12", endurance "12-15"
 
@@ -918,28 +1002,38 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                     onPress: async () => {
                         try {
                             setLoading(true);
-                            
+
                             // Map canonical names to actual exercises (async)
                             const mappedProposal = await mapProposalExercisesAsync(proposal);
-                            
+
                             if (!mappedProposal) {
                                 showDialog("Error", "Failed to map exercises. Please try again.");
                                 return;
                             }
-                            
-                            // Validate we have exercises mapped
-                            const totalExercises = mappedProposal.days.reduce(
+
+                            // CRITICAL: Filter out any exercises that didn't map to a real ID
+                            // This prevents foreign key constraint violations
+                            const sanitizedDays = mappedProposal.days.map((day: any) => ({
+                                ...day,
+                                exercises: (day.exercises || []).filter((ex: any) => !ex._unmapped && ex.exercise_id)
+                            })).filter((day: any) => (day.exercises || []).length > 0 || day.day_type !== 'training');
+
+                            const totalExercises = sanitizedDays.reduce(
                                 (sum: number, day: any) => sum + (day.exercises?.length || 0), 0
                             );
-                            
+
                             if (totalExercises === 0) {
-                                showDialog("Error", "No exercises could be mapped. Please ask the AI to generate a new plan.");
+                                showDialog("Validation Error", "None of the exercises in this plan could be found in the database. Please try a different approach or search for specific exercises first.");
                                 return;
                             }
-                            
-                            // We ALWAYS use createPlan for AI proposals now.
+
+                            const finalProposal = {
+                                ...mappedProposal,
+                                days: sanitizedDays
+                            };
+
                             // plannerService.createPlan automatically deactivates the old plan.
-                            await plannerService.createPlan(user.id, mappedProposal, 'ai_update');
+                            await plannerService.createPlan(user.id, finalProposal, 'ai_update');
 
                             showDialog("Success", isUpdate ? "New version created and activated!" : "New plan created and activated!");
                             loadContext(); // Refresh context
@@ -958,7 +1052,7 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
 
     return (
         <View className="flex-1 bg-gray-950" style={{ paddingTop: insets.top }}>
-            <KeyboardAvoidingView 
+            <KeyboardAvoidingView
                 className="flex-1"
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={0}
@@ -988,15 +1082,15 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
 
                     {/* Auto Insight Card */}
                     {autoInsight && messages.length === 0 && (
-                        <InsightCard 
-                            insight={autoInsight} 
-                            onDismiss={() => setAutoInsight(null)} 
+                        <InsightCard
+                            insight={autoInsight}
+                            onDismiss={() => setAutoInsight(null)}
                         />
                     )}
 
                     {/* Empty State with Quick Actions */}
                     {messages.length === 0 && showQuickActions && !contextLoading && (
-                        <ScrollView 
+                        <ScrollView
                             className="flex-1 px-4"
                             contentContainerStyle={{ paddingTop: 20, paddingBottom: 20 }}
                             showsVerticalScrollIndicator={false}
@@ -1013,7 +1107,7 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                                     I analyze your workouts, track your progress, and provide data-driven recommendations to help you reach your goals faster.
                                 </Text>
                             </View>
-                        
+
                         </ScrollView>
                     )}
 
@@ -1033,7 +1127,7 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                             ref={flatListRef}
                             data={messages}
                             className="flex-1 px-4"
-                            contentContainerStyle={{ 
+                            contentContainerStyle={{
                                 paddingVertical: 20,
                                 paddingBottom: 20
                             }}
@@ -1075,10 +1169,13 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                                                             Day {day.day_number}: {day.day_name}
                                                         </Text>
                                                         {day.exercises?.slice(0, 3).map((ex: any, eIdx: number) => {
-                                                            const exName = metadata?.exercises?.find((e: any) => e.id === ex.exercise_id)?.name || "Exercise";
+                                                            // Prioritize exercise_name from proposal, fallback to id-based lookup in local metadata
+                                                            const exName = ex.exercise_name || ex.name || metadata?.exercises?.find((e: any) => e.id === ex.exercise_id)?.name || "Exercise";
+                                                            const isUnmapped = ex._unmapped;
                                                             return (
-                                                                <Text key={eIdx} className="text-gray-300 text-sm ml-2" numberOfLines={1}>
+                                                                <Text key={eIdx} className={`text-sm ml-2 ${isUnmapped ? 'text-amber-500/70' : 'text-gray-300'}`} numberOfLines={1}>
                                                                     • {exName} ({ex.target_sets} × {ex.target_reps || '8-12'})
+                                                                    {isUnmapped && " (unmatched)"}
                                                                 </Text>
                                                             );
                                                         })}
@@ -1128,7 +1225,7 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                     )}
 
                     {/* Input Field - Fixed at bottom with proper tab bar offset */}
-                    <View 
+                    <View
                         className="px-4 pt-3 pb-2 bg-gray-950 border-t border-gray-800"
                         style={{ paddingBottom: Math.max(TAB_BAR_HEIGHT + 8, insets.bottom + TAB_BAR_HEIGHT) }}
                     >

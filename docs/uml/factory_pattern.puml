@@ -1,0 +1,40 @@
+@startuml Factory Pattern - CoachFactory
+
+skinparam classAttributeIconSize 0
+skinparam monochrome true
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam classFontSize 14
+
+interface "WorkoutCoach" as WC {
+    + getAnalysisPrompt(workoutData, profile, comparison): CoachPrompt
+}
+
+class "AnalyticCoach" as AC {
+    + getAnalysisPrompt(workoutData, profile, comparison): CoachPrompt
+    - formatSummary(data): string
+}
+
+class "MotivationalCoach" as MC {
+    + getAnalysisPrompt(workoutData, profile, comparison): CoachPrompt
+}
+
+class "CoachFactory" as CF {
+    + {static} createCoach(type: 'analytic' | 'motivational'): WorkoutCoach
+}
+
+class "aiService\n(Client)" as Client {
+    + analyzeWorkout(userId, workoutData, coachType): Promise
+}
+
+WC <|.. AC
+WC <|.. MC
+WC <.. CF : <<creates>>
+CF <.. Client : <<uses>>
+
+note right of Client
+  coach = CoachFactory.createCoach(coachType)
+  { systemInstruction, userPrompt } = coach.getAnalysisPrompt(...)
+end note
+
+@enduml

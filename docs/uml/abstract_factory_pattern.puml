@@ -1,0 +1,83 @@
+@startuml Abstract Factory Pattern - AIFactory
+
+skinparam classAttributeIconSize 0
+skinparam monochrome true
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam classFontSize 14
+
+' ===== ABSTRACT PRODUCTS =====
+interface "AbstractWorkoutCoach" as AWC {
+    + analyze(workoutData, profile, comparison): Promise<AIAnalysisResponse>
+}
+
+interface "AbstractPlanGenerator" as APG {
+    + generate(userId, goals): Promise<any>
+}
+
+' ===== ABSTRACT FACTORY =====
+interface "AIFactory" as AF {
+    + createCoach(): AbstractWorkoutCoach
+    + createPlanGenerator(): AbstractPlanGenerator
+}
+
+' ===== CONCRETE PRODUCTS (Gemini) =====
+class "GeminiCoach" as GC {
+    + analyze(workoutData, profile, comparison): Promise<AIAnalysisResponse>
+}
+
+class "GeminiPlanGenerator" as GPG {
+    + generate(userId, goals): Promise<any>
+}
+
+' ===== CONCRETE PRODUCTS (OpenAI) =====
+class "OpenAICoach" as OC {
+    + analyze(workoutData, profile, comparison): Promise<AIAnalysisResponse>
+}
+
+class "OpenAIPlanGenerator" as OPG {
+    + generate(userId, goals): Promise<any>
+}
+
+' ===== CONCRETE FACTORIES =====
+class "GeminiAIFactory" as GAF {
+    + createCoach(): AbstractWorkoutCoach
+    + createPlanGenerator(): AbstractPlanGenerator
+}
+
+class "OpenAIAIFactory" as OAF {
+    + createCoach(): AbstractWorkoutCoach
+    + createPlanGenerator(): AbstractPlanGenerator
+}
+
+' ===== CLIENT =====
+class "AIClient" as Client {
+    - factory: AIFactory
+    + AIClient(factory: AIFactory)
+    + getWorkoutAnalysis(data): Promise
+}
+
+' ===== RELATIONSHIPS =====
+AWC <|.. GC
+AWC <|.. OC
+APG <|.. GPG
+APG <|.. OPG
+
+AF <|.. GAF
+AF <|.. OAF
+
+GAF ..> GC : <<creates>>
+GAF ..> GPG : <<creates>>
+OAF ..> OC : <<creates>>
+OAF ..> OPG : <<creates>>
+
+Client --> AF : uses
+
+note bottom of Client
+  // Der Client wählt die Factory zur Laufzeit
+  const factory = new GeminiAIFactory();
+  const client = new AIClient(factory);
+  client.getWorkoutAnalysis(data);
+end note
+
+@enduml
