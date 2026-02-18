@@ -20,6 +20,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+function PreferenceRow({ label, value }: { label: string; value?: string | null }) {
+    return (
+        <View className="flex-row items-center justify-between">
+            <Text className="text-gray-500 text-sm">{label}</Text>
+            <Text className="text-white text-sm font-medium">{value || 'Not set'}</Text>
+        </View>
+    );
+}
+
 export default function ProfileScreen() {
     const { user, profile, loading: authLoading, signOut } = useAuthContext();
     const router = useRouter();
@@ -140,6 +149,26 @@ export default function ProfileScreen() {
                                 {/* Goals Section */}
                                 <GoalsSection />
 
+                                {/* Training Preferences Section */}
+                                <View className="mb-8">
+                                    <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Training Preferences</Text>
+                                    <View className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                                        <PreferenceRow label="Goal" value={profile?.primary_goal} />
+                                        <View className="h-[1px] bg-gray-800 my-3" />
+                                        <PreferenceRow label="Experience" value={profile?.fitness_level ? profile.fitness_level.charAt(0).toUpperCase() + profile.fitness_level.slice(1) : undefined} />
+                                        <View className="h-[1px] bg-gray-800 my-3" />
+                                        <PreferenceRow label="Training Days" value={profile?.training_days_per_week ? `${profile.training_days_per_week} days / week` : undefined} />
+                                        <View className="h-[1px] bg-gray-800 my-3" />
+                                        <PreferenceRow label="Equipment" value={profile?.available_equipment?.join(', ')} />
+                                    </View>
+                                    <TouchableOpacity
+                                        className="mt-3 flex-row items-center justify-center py-3 rounded-xl border border-gray-800 bg-gray-900/50"
+                                        onPress={handleManagePreferences}
+                                    >
+                                        <Text className="text-blue-400 font-semibold text-sm">Edit Preferences</Text>
+                                    </TouchableOpacity>
+                                </View>
+
                                 {/* Personal Info Section */}
                                 <View className="mb-8">
                                     <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Personal Information</Text>
@@ -237,13 +266,6 @@ export default function ProfileScreen() {
                                     onPress={handleLogout}
                                 >
                                     <Text className="text-red-500 text-center font-bold text-lg">Logout</Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    className="mt-4 bg-gray-900 py-4 rounded-2xl border border-blue-500/40"
-                                    onPress={handleManagePreferences}
-                                >
-                                    <Text className="text-blue-300 text-center font-bold text-lg">Manage Preferences</Text>
                                 </TouchableOpacity>
 
                                 <View className="mt-8 items-center">
@@ -272,6 +294,26 @@ export default function ProfileScreen() {
                                 {/* Goals Section */}
                                 <GoalsSection />
 
+                                {/* Training Preferences Section */}
+                                <View className="mb-8">
+                                    <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Training Preferences</Text>
+                                    <View className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                                        <PreferenceRow label="Goal" value={profile?.primary_goal} />
+                                        <View className="h-[1px] bg-gray-800 my-3" />
+                                        <PreferenceRow label="Experience" value={profile?.fitness_level ? profile.fitness_level.charAt(0).toUpperCase() + profile.fitness_level.slice(1) : undefined} />
+                                        <View className="h-[1px] bg-gray-800 my-3" />
+                                        <PreferenceRow label="Training Days" value={profile?.training_days_per_week ? `${profile.training_days_per_week} days / week` : undefined} />
+                                        <View className="h-[1px] bg-gray-800 my-3" />
+                                        <PreferenceRow label="Equipment" value={profile?.available_equipment?.join(', ')} />
+                                    </View>
+                                    <TouchableOpacity
+                                        className="mt-3 flex-row items-center justify-center py-3 rounded-xl border border-gray-800 bg-gray-900/50"
+                                        onPress={handleManagePreferences}
+                                    >
+                                        <Text className="text-blue-400 font-semibold text-sm">Edit Preferences</Text>
+                                    </TouchableOpacity>
+                                </View>
+
                                 {/* Personal Info Section */}
                                 <View className="mb-8">
                                     <Text className="text-gray-400 font-bold mb-4 uppercase text-xs tracking-widest">Personal Information</Text>
@@ -369,13 +411,6 @@ export default function ProfileScreen() {
                                     onPress={handleLogout}
                                 >
                                     <Text className="text-red-500 text-center font-bold text-lg">Logout</Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    className="mt-4 bg-gray-900 py-4 rounded-2xl border border-blue-500/40"
-                                    onPress={handleManagePreferences}
-                                >
-                                    <Text className="text-blue-300 text-center font-bold text-lg">Manage Preferences</Text>
                                 </TouchableOpacity>
 
                                 <View className="mt-8 items-center">

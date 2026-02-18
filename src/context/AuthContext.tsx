@@ -61,11 +61,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             if (session?.user) {
                 // Only fetch if we don't have it or it's a new user
-                fetchProfile(session.user.id)
+                fetchProfile(session.user.id).finally(() => setLoading(false))
             } else {
                 setProfile(null)
+                setLoading(false)
             }
-            setLoading(false)
         })
 
         return () => subscription.unsubscribe()

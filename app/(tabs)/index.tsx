@@ -51,7 +51,7 @@ export default function Dashboard() {
   // --- Weight Chart Filtering State ---
   const [weightRange, setWeightRange] = useState<'2m' | '6m' | '1y' | 'all'>('2m');
 
-  // Helper to filter weightData by range
+  // Helper to filter weightData by range and downsample for clean display
   const getFilteredWeightData = () => {
     if (!weightData) return [];
     const now = new Date();
@@ -59,8 +59,16 @@ export default function Dashboard() {
     if (weightRange === '2m') cutoff = new Date(now.getFullYear(), now.getMonth() - 2, now.getDate());
     else if (weightRange === '6m') cutoff = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
     else if (weightRange === '1y') cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-    if (!cutoff) return weightData;
-    return weightData.filter((d: any) => new Date(d.date) >= cutoff);
+    const filtered = cutoff ? weightData.filter((d: any) => new Date(d.date) >= cutoff) : weightData;
+    // Downsample to max ~20 points for a clean chart
+    if (filtered.length <= 20) return filtered;
+    const step = filtered.length / 19;
+    const sampled: any[] = [];
+    for (let i = 0; i < 19; i++) {
+      sampled.push(filtered[Math.round(i * step)]);
+    }
+    sampled.push(filtered[filtered.length - 1]); // always include latest
+    return sampled;
   };
 
   const loadData = useCallback(async () => {
@@ -97,7 +105,15 @@ export default function Dashboard() {
             });
           }
         });
-        setPlanExercises(Array.from(uniqueExercises.values()));
+        const allExercises = Array.from(uniqueExercises.values());
+        setPlanExercises(allExercises);
+
+        // Auto-select first 3 exercises if none selected yet
+        if (selectedExercises.length === 0 && allExercises.length > 0) {
+          const autoSelect = allExercises.slice(0, 3).map((ex: any) => ex.id);
+          setSelectedExercises(autoSelect);
+          autoSelect.forEach((id: string) => loadExerciseProgress(id));
+        }
 
         // First, check if any workout was completed today
         const startOfToday = new Date();
@@ -558,44 +574,64 @@ export default function Dashboard() {
           </View>
 
           {/* Weight Progress Chart */}
-          {chartData && (
-            <>
-              <Text className="text-lg font-bold text-white mb-4">Weight Progress</Text>
-              <View className="flex-row mb-2 gap-2">
-                {['2m', '6m', '1y', 'all'].map((range) => (
-                  <TouchableOpacity
-                    key={range}
-                    className={`px-3 py-1 rounded-full border ${weightRange === range ? 'bg-blue-600 border-blue-500' : 'bg-gray-800 border-gray-700'}`}
-                    onPress={() => setWeightRange(range as any)}
-                  >
-                    <Text className={`text-xs font-bold ${weightRange === range ? 'text-white' : 'text-gray-400'}`}>{
-                      range === '2m' ? '2M' : range === '6m' ? '6M' : range === '1y' ? '1Y' : 'ALL'
-                    }</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View className="bg-gray-900 rounded-3xl p-4 mb-6 border border-gray-800">
-                <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: Dimensions.get('window').width - 64 }}>
+          {chartData && (() => {
+            const filtered = getFilteredWeightData();
+            if (filtered.length === 0) return null;
+            const screenW = Dimensions.get('window').width - 64;
+            const startWeight = filtered[0]?.weight;
+            const endWeight = filtered[filtered.length - 1]?.weight;
+            const diff = endWeight - startWeight;
+            const labels = filtered.map((d: any, idx: number) => {
+              const totalPoints = filtered.length;
+              if (totalPoints <= 5) return format(new Date(d.date), 'MMM d');
+              const interval = Math.ceil(totalPoints / 4);
+              if (idx === 0 || idx === totalPoints - 1 || (idx % interval === 0 && idx < totalPoints - interval / 2)) {
+                return format(new Date(d.date), 'MMM d');
+              }
+              return '';
+            });
+            return (
+              <>
+                <View className="flex-row justify-between items-center mb-4">
+                  <Text className="text-lg font-bold text-white">Weight Progress</Text>
+                  <View className="flex-row items-center">
+                    <Text className="text-white font-bold text-lg mr-1">{endWeight.toFixed(1)}</Text>
+                    <Text className="text-gray-400 text-sm">kg</Text>
+                    {diff !== 0 && (
+                      <View className={`ml-2 px-2 py-0.5 rounded-full ${diff > 0 ? 'bg-green-900/50' : 'bg-red-900/50'}`}>
+                        <Text className={`text-xs font-bold ${diff > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {diff > 0 ? '+' : ''}{diff.toFixed(1)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <View className="flex-row mb-2 gap-2">
+                  {(['2m', '6m', '1y', 'all'] as const).map((range) => (
+                    <TouchableOpacity
+                      key={range}
+                      className={`px-3 py-1 rounded-full border ${weightRange === range ? 'bg-blue-600 border-blue-500' : 'bg-gray-800 border-gray-700'}`}
+                      onPress={() => setWeightRange(range as any)}
+                    >
+                      <Text className={`text-xs font-bold ${weightRange === range ? 'text-white' : 'text-gray-400'}`}>
+                        {range.toUpperCase()}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View className="bg-gray-900 rounded-3xl p-4 mb-6 border border-gray-800">
                   <LineChart
                     data={{
-                      labels: getFilteredWeightData().map((d: any, idx: number) => {
-                        const filtered = getFilteredWeightData();
-                        const totalPoints = filtered.length;
-                        if (totalPoints <= 6) return format(new Date(d.date), 'MMM d');
-                        const interval = Math.ceil(totalPoints / 4);
-                        if (idx === 0 || idx === totalPoints - 1 || (idx % interval === 0 && idx < totalPoints - interval / 2)) {
-                          return format(new Date(d.date), 'MMM d');
-                        }
-                        return '';
-                      }),
-                      datasets: [{ data: getFilteredWeightData().map((d: any) => d.weight) }]
+                      labels,
+                      datasets: [{ data: filtered.map((d: any) => d.weight) }]
                     }}
-                    width={Math.max(Dimensions.get('window').width - 64, getFilteredWeightData().length * 60)}
-                    height={220}
+                    width={screenW}
+                    height={200}
                     fromZero={false}
                     withHorizontalLines={true}
                     withVerticalLines={false}
                     withInnerLines={true}
+                    withShadow={true}
                     chartConfig={{
                       backgroundColor: '#1f2937',
                       backgroundGradientFrom: '#1f2937',
@@ -603,29 +639,24 @@ export default function Dashboard() {
                       decimalPlaces: 1,
                       color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
                       labelColor: (opacity = 1) => `rgba(156, 163, 175, ${opacity})`,
+                      fillShadowGradientFrom: 'rgba(59, 130, 246, 0.3)',
+                      fillShadowGradientTo: 'rgba(59, 130, 246, 0.0)',
                       propsForBackgroundLines: {
                         strokeDasharray: '',
                         stroke: 'rgba(55, 65, 81, 0.3)',
                         strokeWidth: 1
                       },
-                      style: {
-                        borderRadius: 16
-                      },
-                      propsForDots: {
-                        r: '0'
-                      },
-                      strokeWidth: 3
+                      style: { borderRadius: 16 },
+                      propsForDots: { r: '3', strokeWidth: '2', stroke: '#3b82f6' },
+                      strokeWidth: 2
                     }}
                     bezier
-                    style={{
-                      marginVertical: 8,
-                      borderRadius: 16
-                    }}
+                    style={{ marginVertical: 4, borderRadius: 16 }}
                   />
-                </ScrollView>
-              </View>
-            </>
-          )}
+                </View>
+              </>
+            );
+          })()}
 
           {/* Exercise Progress */}
           {planExercises.length > 0 && (
@@ -655,59 +686,90 @@ export default function Dashboard() {
                       const exercise = planExercises.find(ex => ex.id === exerciseId);
                       const progressData = exerciseProgressData.get(exerciseId);
 
-                      const chartData = progressData && progressData.length > 0 ? {
-                        labels: progressData.map((d: any, idx: number) => {
-                          const totalPoints = progressData.length;
-                          if (totalPoints <= 6) return format(new Date(d.date), 'MMM d');
-                          const interval = Math.floor(totalPoints / 5);
+                      // Downsample exercise progress for clean chart
+                      let displayData = progressData || [];
+                      if (displayData.length > 15) {
+                        const step = displayData.length / 14;
+                        const sampled: any[] = [];
+                        for (let i = 0; i < 14; i++) sampled.push(displayData[Math.round(i * step)]);
+                        sampled.push(displayData[displayData.length - 1]);
+                        displayData = sampled;
+                      }
+
+                      const chartData = displayData.length > 0 ? {
+                        labels: displayData.map((d: any, idx: number) => {
+                          const totalPoints = displayData.length;
+                          if (totalPoints <= 5) return format(new Date(d.date), 'MMM d');
+                          const interval = Math.ceil(totalPoints / 4);
                           if (idx === 0 || idx === totalPoints - 1 || (idx % interval === 0 && idx < totalPoints - interval / 2)) {
                             return format(new Date(d.date), 'MMM d');
                           }
                           return '';
                         }),
                         datasets: [{
-                          data: progressData.map((d: any) => d.weight),
-                          color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`
+                          data: displayData.map((d: any) => d.weight),
+                          color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`
                         }]
                       } : null;
+
+                      const latestWeight = displayData.length > 0 ? displayData[displayData.length - 1].weight : null;
+                      const firstWeight = displayData.length > 1 ? displayData[0].weight : null;
+                      const exDiff = latestWeight && firstWeight ? latestWeight - firstWeight : 0;
 
                       return (
                         <View style={{ width: Dimensions.get('window').width - 32 }}>
                           <View className="bg-gray-900 rounded-3xl p-4 mr-4 border border-gray-800">
-                            <Text className="text-white font-bold text-lg mb-2">{exercise?.name}</Text>
+                            <View className="flex-row justify-between items-center mb-2">
+                              <Text className="text-white font-bold text-base flex-1" numberOfLines={1}>{exercise?.name}</Text>
+                              {latestWeight != null && (
+                                <View className="flex-row items-center">
+                                  <Text className="text-white font-bold text-base mr-1">{latestWeight}</Text>
+                                  <Text className="text-gray-400 text-sm">kg</Text>
+                                  {exDiff !== 0 && (
+                                    <View className={`ml-2 px-1.5 py-0.5 rounded-full ${exDiff > 0 ? 'bg-green-900/50' : 'bg-red-900/50'}`}>
+                                      <Text className={`text-xs font-bold ${exDiff > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {exDiff > 0 ? '+' : ''}{exDiff.toFixed(1)}
+                                      </Text>
+                                    </View>
+                                  )}
+                                </View>
+                              )}
+                            </View>
                             {chartData ? (
                               <LineChart
                                 data={chartData}
                                 width={Dimensions.get('window').width - 80}
-                                height={200}
+                                height={180}
                                 fromZero={false}
                                 withHorizontalLines={true}
                                 withVerticalLines={false}
                                 withInnerLines={true}
+                                withShadow={true}
                                 chartConfig={{
                                   backgroundColor: '#1f2937',
                                   backgroundGradientFrom: '#1f2937',
                                   backgroundGradientTo: '#1f2937',
                                   decimalPlaces: 1,
-                                  color: (opacity = 1) => `rgba(159, 130, 254, 1)`,
+                                  color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`,
                                   labelColor: (opacity = 1) => `rgba(156, 163, 175, ${opacity})`,
+                                  fillShadowGradientFrom: 'rgba(139, 92, 246, 0.25)',
+                                  fillShadowGradientTo: 'rgba(139, 92, 246, 0.0)',
                                   propsForBackgroundLines: {
                                     strokeDasharray: '',
                                     stroke: 'rgba(55, 65, 81, 0.3)',
                                     strokeWidth: 1
                                   },
                                   style: { borderRadius: 16 },
-                                  propsForDots: {
-                                    r: '0'
-                                  },
-                                  strokeWidth: 3
+                                  propsForDots: { r: '3', strokeWidth: '2', stroke: '#8b5cf6' },
+                                  strokeWidth: 2
                                 }}
                                 bezier
-                                style={{ marginVertical: 8, borderRadius: 16 }}
+                                style={{ marginVertical: 4, borderRadius: 16 }}
                               />
                             ) : (
-                              <View className="items-center justify-center py-12">
-                                <Text className="text-gray-500 text-center">No workout data yet for this exercise</Text>
+                              <View className="items-center justify-center py-10">
+                                <Ionicons name="barbell-outline" size={32} color="#4b5563" />
+                                <Text className="text-gray-500 text-center mt-2 text-sm">No data yet — complete a workout to see progress</Text>
                               </View>
                             )}
                           </View>

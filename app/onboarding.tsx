@@ -1,468 +1,269 @@
-import { NumericTextInput } from '@/components/NumericTextInput';
 import { useAuthContext } from '@/context/AuthContext';
-import { useNumericKeypad } from '@/context/NumericKeypadContext';
-import { useAuth } from '@/hooks/useAuth';
-import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { Profile } from '@/lib/database.types';
 import { profileService } from '@/services/profile.service';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
-import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import Animated, { FadeInUp, FadeOutDown } from 'react-native-reanimated';
+import React, { useState } from 'react';
+import {
+    ActivityIndicator,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type OnboardingForm = {
-    height_cm: string;
-    weight_kg: string;
-    age: string;
-    gender: 'male' | 'female' | 'other' | 'prefer_not_to_say';
-    fitness_level: 'beginner' | 'intermediate' | 'advanced';
-    training_location: 'commercial_gym' | 'home_gym' | 'bodyweight_only';
-    primary_goal: 'build_muscle' | 'get_stronger' | 'improve_fitness' | 'maintain';
-    training_days_preference: '2-3' | '3-4' | '4-5' | '5+';
+// ─── Types ───────────────────────────────────────────────────────────
+type StepId = 'goal' | 'frequency' | 'experience' | 'equipment';
+
+type Option = {
+    key: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    label: string;
+    hint: string;
 };
 
+// ─── Data ────────────────────────────────────────────────────────────
+const GOALS: Option[] = [
+    { key: 'build_muscle', icon: 'barbell', label: 'Build Muscle', hint: 'Hypertrophy & size gains' },
+    { key: 'get_stronger', icon: 'trending-up', label: 'Get Stronger', hint: 'Prioritise strength & power' },
+    { key: 'lose_fat', icon: 'flame', label: 'Lose Fat', hint: 'Cut weight while preserving muscle' },
+    { key: 'improve_fitness', icon: 'heart', label: 'General Fitness', hint: 'Conditioning, health, energy' },
+    { key: 'maintain', icon: 'shield-checkmark', label: 'Maintain', hint: 'Keep current level & stay healthy' },
+];
+
+const FREQUENCIES: Option[] = [
+    { key: '2-3', icon: 'calendar-outline', label: '2\u20133 days', hint: 'Great for starting out' },
+    { key: '3-4', icon: 'calendar', label: '3\u20134 days', hint: 'Balanced & sustainable' },
+    { key: '4-5', icon: 'calendar-sharp', label: '4\u20135 days', hint: 'Dedicated training split' },
+    { key: '5+', icon: 'fitness', label: '5+ days', hint: 'Advanced high-frequency' },
+];
+
+const EXPERIENCE: Option[] = [
+    { key: 'beginner', icon: 'leaf', label: 'Beginner', hint: 'New or returning to training' },
+    { key: 'intermediate', icon: 'flash', label: 'Intermediate', hint: '1\u20133 years consistent training' },
+    { key: 'advanced', icon: 'trophy', label: 'Advanced', hint: '3+ years structured lifting' },
+];
+
+const EQUIPMENT: Option[] = [
+    { key: 'commercial_gym', icon: 'business', label: 'Full Gym', hint: 'Machines, cables, racks, dumbbells' },
+    { key: 'home_gym', icon: 'home', label: 'Home Gym', hint: 'Some weights & a bench' },
+    { key: 'bodyweight_only', icon: 'body', label: 'Bodyweight Only', hint: 'No equipment needed' },
+];
+
+const STEPS: { id: StepId; title: string; subtitle: string; options: Option[] }[] = [
+    { id: 'goal', title: "What's your goal?", subtitle: 'Pick the one that matters most right now.', options: GOALS },
+    { id: 'frequency', title: 'How often can you train?', subtitle: 'Be realistic \u2014 consistency beats volume.', options: FREQUENCIES },
+    { id: 'experience', title: 'Training experience', subtitle: 'This helps us tailor exercise selection.', options: EXPERIENCE },
+    { id: 'equipment', title: 'Where do you train?', subtitle: "We'll match exercises to your setup.", options: EQUIPMENT },
+];
+
+const TOTAL_STEPS = STEPS.length;
+
+// ─── Component ───────────────────────────────────────────────────────
 export default function Onboarding() {
-    const { user } = useAuth();
-    const { refreshProfile, setProfileLocal, profile } = useAuthContext();
+    const { user, profile, refreshProfile, setProfileLocal } = useAuthContext();
     const router = useRouter();
-    const { showDialog } = useConfirmDialog();
+
+    const [step, setStep] = useState(0);
+    const [answers, setAnswers] = useState<Record<StepId, string>>({
+        goal: profile?.primary_goal?.includes('muscle') ? 'build_muscle'
+            : profile?.primary_goal?.includes('strong') ? 'get_stronger'
+            : profile?.primary_goal?.includes('fat') ? 'lose_fat'
+            : profile?.primary_goal?.includes('fitness') ? 'improve_fitness'
+            : profile?.primary_goal?.includes('Maintain') ? 'maintain'
+            : '',
+        frequency: profile?.training_days_per_week
+            ? profile.training_days_per_week <= 3 ? '2-3'
+            : profile.training_days_per_week <= 4 ? '3-4'
+            : profile.training_days_per_week <= 5 ? '4-5'
+            : '5+'
+            : '',
+        experience: profile?.fitness_level || '',
+        equipment: profile?.available_equipment?.[0]?.toLowerCase().includes('commercial') ? 'commercial_gym'
+            : profile?.available_equipment?.[0]?.toLowerCase().includes('home') ? 'home_gym'
+            : profile?.available_equipment?.[0]?.toLowerCase().includes('body') ? 'bodyweight_only'
+            : '',
+    });
+    const [saving, setSaving] = useState(false);
 
     if (!user) return null;
-    const [step, setStep] = useState(1);
-    const [loading, setLoading] = useState(false);
-    const totalSteps = 6;
-    const heightRef = useRef<TextInput>(null);
-    const weightRef = useRef<TextInput>(null);
-    const ageRef = useRef<TextInput>(null);
-    const scrollRef = useRef<ScrollView>(null);
-    const [sexSectionY, setSexSectionY] = useState<number | null>(null);
-    const { close: closeKeypad } = useNumericKeypad();
 
-    // React Hook Form setup
-    const { control, handleSubmit } = useForm<OnboardingForm>({
-        defaultValues: {
-            height_cm: '',
-            weight_kg: '',
-            age: '',
-            gender: 'prefer_not_to_say',
-            fitness_level: 'beginner',
-            training_location: 'commercial_gym',
-            primary_goal: 'build_muscle',
-            training_days_preference: '3-4'
+    const currentStep = STEPS[step];
+    const isLastStep = step === TOTAL_STEPS - 1;
+    const canAdvance = !!answers[currentStep.id];
+
+    // ── Handlers ──────────────────────────────────────────────────────
+    const selectOption = (key: string) => {
+        setAnswers(prev => ({ ...prev, [currentStep.id]: key }));
+        // Auto-advance after a short delay unless last step
+        if (!isLastStep) {
+            setTimeout(() => setStep(s => s + 1), 300);
         }
-    });
+    };
 
-    const onSubmit = async (formData: OnboardingForm) => {
-        if (!user) return;
-        setLoading(true);
+    const goBack = () => {
+        if (step > 0) setStep(s => s - 1);
+    };
 
-        console.log('Onboarding form data:', formData);
+    const finish = async () => {
+        if (saving) return;
+        setSaving(true);
+
+        const goalLabels: Record<string, string> = {
+            build_muscle: 'Build muscle',
+            get_stronger: 'Get stronger',
+            lose_fat: 'Lose fat',
+            improve_fitness: 'Improve general fitness',
+            maintain: 'Maintain',
+        };
+        const trainingDaysMap: Record<string, number> = {
+            '2-3': 3, '3-4': 4, '4-5': 5, '5+': 6,
+        };
+        const equipmentLabels: Record<string, string[]> = {
+            commercial_gym: ['Commercial gym'],
+            home_gym: ['Home gym'],
+            bodyweight_only: ['Bodyweight only'],
+        };
+
+        const displayName =
+            profile?.display_name ||
+            (user?.user_metadata as any)?.full_name ||
+            user?.email?.split('@')[0] ||
+            'Athlete';
 
         try {
-            const trainingDaysMap: Record<OnboardingForm['training_days_preference'], number> = {
-                '2-3': 3,
-                '3-4': 4,
-                '4-5': 5,
-                '5+': 6
-            };
-            const goalLabels: Record<OnboardingForm['primary_goal'], string> = {
-                build_muscle: 'Build muscle',
-                get_stronger: 'Get stronger',
-                improve_fitness: 'Improve general fitness',
-                maintain: 'Maintain'
-            };
-            const equipmentLabels: Record<OnboardingForm['training_location'], string[]> = {
-                commercial_gym: ['Commercial gym'],
-                home_gym: ['Home gym'],
-                bodyweight_only: ['Bodyweight only']
-            };
-            const height = parseFloat(formData.height_cm);
-            const weight = parseFloat(formData.weight_kg);
-            const ageNum = parseInt(formData.age, 10);
-
-            if (!Number.isFinite(height) || !Number.isFinite(weight) || !Number.isFinite(ageNum)) {
-                throw new Error('Please enter valid numbers for height, weight, and age.');
-            }
-
-            const currentYear = new Date().getFullYear();
-            const birthYear = currentYear - ageNum;
-            const birthDate = `${birthYear}-01-01`; // Approximation
-
-            const displayName =
-                profile?.display_name ||
-                (user?.user_metadata as any)?.full_name ||
-                user?.email?.split('@')[0] ||
-                'Athlete';
-
             const { data: updatedProfile, error } = await profileService.updateProfile(user.id, {
                 display_name: displayName,
-                height_cm: height,
-                weight_kg: weight,
-                birth_date: birthDate,
-                gender: formData.gender,
-                fitness_level: formData.fitness_level,
-                primary_goal: goalLabels[formData.primary_goal],
-                training_days_per_week: trainingDaysMap[formData.training_days_preference],
-                available_equipment: equipmentLabels[formData.training_location]
+                fitness_level: answers.experience as Profile['fitness_level'],
+                primary_goal: goalLabels[answers.goal] || answers.goal,
+                training_days_per_week: trainingDaysMap[answers.frequency] || 4,
+                available_equipment: equipmentLabels[answers.equipment] || ['Commercial gym'],
             });
 
-            console.log('Profile update result:', { updatedProfile, error });
-
             if (error) throw error;
-
-            if (updatedProfile) {
-                setProfileLocal(updatedProfile as Profile);
-            }
+            if (updatedProfile) setProfileLocal(updatedProfile as Profile);
             await refreshProfile();
             router.replace('/(tabs)');
-
         } catch (e: any) {
-            showDialog('Error', e.message);
+            console.error('Onboarding save error:', e);
+            // still navigate — better than getting stuck
+            router.replace('/(tabs)');
         } finally {
-            setLoading(false);
+            setSaving(false);
         }
     };
 
-    const nextStep = () => setStep(s => s < 6 ? s + 1 : s);
-    const prevStep = () => setStep(s => s > 1 ? s - 1 : s);
-
-    const renderStep = () => {
-        switch (step) {
-            case 1: // Welcome
-                return (
-                    <Animated.View entering={FadeInUp} exiting={FadeOutDown} className="flex-1 px-6 justify-center items-center w-full">
-                        <View className="items-center w-full max-w-xl">
-                            <Text className="text-3xl font-bold text-white text-center mb-2">
-                                {profile?.display_name ? `Welcome, ${profile.display_name}` : 'Welcome'}
-                            </Text>
-                            <Text className="text-gray-400 text-center mb-8">
-                                Let’s set up your training plan with a few quick questions.
-                            </Text>
-                        </View>
-
-                        <TouchableOpacity
-                            onPress={nextStep}
-                            className="bg-blue-600 px-6 py-4 rounded-2xl items-center w-full max-w-[320px] self-center shadow-lg shadow-blue-500/20"
-                        >
-                            <Text className="text-white font-bold text-lg">Let’s Start</Text>
-                        </TouchableOpacity>
-                    </Animated.View>
-                );
-
-            case 2: // Basics
-                return (
-                    <Animated.View entering={FadeInUp} exiting={FadeOutDown} className="flex-1 p-6">
-                        <View className="items-center mb-6">
-                            <Text className="text-2xl font-bold text-white text-center mb-1">Quick Basics</Text>
-                            <Text className="text-gray-400 text-center">Personalize your plan in a minute.</Text>
-                        </View>
-
-                        <View className="flex-row gap-4">
-                            <View className="flex-1">
-                                <Text className="mb-2 font-medium text-gray-200">Height (cm)</Text>
-                                <Controller
-                                    control={control}
-                                    name="height_cm"
-                                    rules={{ required: true }}
-                                    render={({ field: { onChange, value } }) => (
-                                        <NumericTextInput
-                                            ref={heightRef}
-                                            className="bg-gray-900 border border-gray-800 p-4 rounded-2xl mb-4 text-white"
-                                            placeholder="180"
-                                            placeholderTextColor="#6b7280"
-                                            value={value}
-                                            onChangeText={onChange}
-                                            allowDecimal={false}
-                                            onNext={() => weightRef.current?.focus()}
-                                        />
-                                    )}
-                                />
-                            </View>
-                            <View className="flex-1">
-                                <Text className="mb-2 font-medium text-gray-200">Weight (kg)</Text>
-                                <Controller
-                                    control={control}
-                                    name="weight_kg"
-                                    rules={{ required: true }}
-                                    render={({ field: { onChange, value } }) => (
-                                        <NumericTextInput
-                                            ref={weightRef}
-                                            className="bg-gray-900 border border-gray-800 p-4 rounded-2xl mb-4 text-white"
-                                            placeholder="75"
-                                            placeholderTextColor="#6b7280"
-                                            value={value}
-                                            onChangeText={onChange}
-                                            step={0.5}
-                                            onNext={() => ageRef.current?.focus()}
-                                        />
-                                    )}
-                                />
-                            </View>
-                        </View>
-
-                        <Text className="mb-2 font-medium text-gray-200">Age</Text>
-                        <Controller
-                            control={control}
-                            name="age"
-                            rules={{ required: true }}
-                            render={({ field: { onChange, value } }) => (
-                                <NumericTextInput
-                                    ref={ageRef}
-                                    className="bg-gray-900 border border-gray-800 p-4 rounded-2xl mb-6 text-white"
-                                    placeholder="25"
-                                    placeholderTextColor="#6b7280"
-                                    value={value}
-                                    onChangeText={onChange}
-                                    allowDecimal={false}
-                                    onNext={() => {
-                                        closeKeypad();
-                                        if (sexSectionY !== null) {
-                                            scrollRef.current?.scrollTo({ y: sexSectionY, animated: true });
-                                        }
-                                    }}
-                                />
-                            )}
-                        />
-
-                        <View
-                            onLayout={(event) => setSexSectionY(event.nativeEvent.layout.y)}
-                        >
-                            <Text className="mb-3 font-medium text-gray-200">Sex</Text>
-                            <Controller
-                                control={control}
-                                name="gender"
-                                rules={{ required: true }}
-                                render={({ field: { onChange, value } }) => (
-                                    <View className="flex-row flex-wrap gap-3 mb-8">
-                                        {[
-                                            { key: 'male', label: 'Male' },
-                                            { key: 'female', label: 'Female' },
-                                            { key: 'other', label: 'Other' },
-                                            { key: 'prefer_not_to_say', label: 'Prefer not to say' }
-                                        ].map((option) => {
-                                            const isSelected = value === option.key;
-                                            return (
-                                                <TouchableOpacity
-                                                    key={option.key}
-                                                    onPress={() => onChange(option.key as OnboardingForm['gender'])}
-                                                    className={`px-4 py-3 rounded-full border ${isSelected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-800 bg-gray-900'}`}
-                                                >
-                                                    <Text className={`font-semibold ${isSelected ? 'text-blue-300' : 'text-gray-200'}`}>
-                                                        {option.label}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            );
-                                        })}
-                                    </View>
-                                )}
-                            />
-                        </View>
-
-                        <TouchableOpacity onPress={handleSubmit(() => nextStep())} className="bg-blue-600 p-4 rounded-2xl items-center shadow-lg shadow-blue-500/20">
-                            <Text className="text-white font-bold">Next</Text>
-                        </TouchableOpacity>
-                    </Animated.View>
-                );
-
-            case 3: // Training Experience
-                return (
-                    <Animated.View entering={FadeInUp} exiting={FadeOutDown} className="flex-1 p-6">
-                        <View className="items-center mb-6">
-                            <Text className="text-2xl font-bold text-white text-center mb-1">Training Experience</Text>
-                            <Text className="text-gray-400 text-center">How long have you been training regularly?</Text>
-                        </View>
-
-                        <Controller
-                            control={control}
-                            name="fitness_level"
-                            rules={{ required: true }}
-                            render={({ field: { onChange, value } }) => (
-                                <>
-                                    {[
-                                        { key: 'beginner', label: 'New / Beginner', hint: 'Just getting started or returning.' },
-                                        { key: 'intermediate', label: 'Intermediate', hint: 'Consistent training, solid foundation.' },
-                                        { key: 'advanced', label: 'Advanced', hint: 'Years of structured training.' }
-                                    ].map((option) => {
-                                        const isSelected = value === option.key;
-                                        return (
-                                            <TouchableOpacity
-                                                key={option.key}
-                                                onPress={() => { onChange(option.key as OnboardingForm['fitness_level']); nextStep(); }}
-                                                className={`p-5 rounded-2xl mb-4 border ${isSelected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-800 bg-gray-900'}`}
-                                            >
-                                                <Text className="text-lg font-semibold text-white">{option.label}</Text>
-                                                <Text className="text-gray-400 mt-1">{option.hint}</Text>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </>
-                            )}
-                        />
-
-                        <TouchableOpacity onPress={prevStep} className="mt-2 p-4 items-center">
-                            <Text className="text-gray-500">Back</Text>
-                        </TouchableOpacity>
-                    </Animated.View>
-                );
-
-            case 4: // Training Location
-                return (
-                    <Animated.View entering={FadeInUp} exiting={FadeOutDown} className="flex-1 p-6">
-                        <View className="items-center mb-6">
-                            <Text className="text-2xl font-bold text-white text-center mb-1">Training Location</Text>
-                            <Text className="text-gray-400 text-center">Where do you train most often?</Text>
-                        </View>
-
-                        <Controller
-                            control={control}
-                            name="training_location"
-                            rules={{ required: true }}
-                            render={({ field: { onChange, value } }) => (
-                                <>
-                                    {[
-                                        { key: 'commercial_gym', label: 'Commercial gym', hint: 'Full equipment & machines.' },
-                                        { key: 'home_gym', label: 'Home gym', hint: 'Limited equipment at home.' },
-                                        { key: 'bodyweight_only', label: 'Bodyweight only', hint: 'Minimal or no equipment.' }
-                                    ].map((option) => {
-                                        const isSelected = value === option.key;
-                                        return (
-                                            <TouchableOpacity
-                                                key={option.key}
-                                                onPress={() => { onChange(option.key as OnboardingForm['training_location']); nextStep(); }}
-                                                className={`p-5 rounded-2xl mb-4 border ${isSelected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-800 bg-gray-900'}`}
-                                            >
-                                                <Text className="text-lg font-semibold text-white">{option.label}</Text>
-                                                <Text className="text-gray-400 mt-1">{option.hint}</Text>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </>
-                            )}
-                        />
-
-                        <TouchableOpacity onPress={prevStep} className="mt-2 p-4 items-center">
-                            <Text className="text-gray-500">Back</Text>
-                        </TouchableOpacity>
-                    </Animated.View>
-                );
-
-            case 5: // Primary Goal
-                return (
-                    <Animated.View entering={FadeInUp} exiting={FadeOutDown} className="flex-1 p-6">
-                        <View className="items-center mb-6">
-                            <Text className="text-2xl font-bold text-white text-center mb-1">Primary Goal</Text>
-                            <Text className="text-gray-400 text-center">What’s your main goal right now?</Text>
-                        </View>
-
-                        <Controller
-                            control={control}
-                            name="primary_goal"
-                            rules={{ required: true }}
-                            render={({ field: { onChange, value } }) => (
-                                <>
-                                    {[
-                                        { key: 'build_muscle', label: 'Build muscle', hint: 'Hypertrophy focus.' },
-                                        { key: 'get_stronger', label: 'Get stronger', hint: 'Prioritize strength gains.' },
-                                        { key: 'improve_fitness', label: 'Improve general fitness', hint: 'Energy, conditioning, balance.' },
-                                        { key: 'maintain', label: 'Maintain', hint: 'Stay consistent and healthy.' }
-                                    ].map((option) => {
-                                        const isSelected = value === option.key;
-                                        return (
-                                            <TouchableOpacity
-                                                key={option.key}
-                                                onPress={() => { onChange(option.key as OnboardingForm['primary_goal']); nextStep(); }}
-                                                className={`p-5 rounded-2xl mb-4 border ${isSelected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-800 bg-gray-900'}`}
-                                            >
-                                                <Text className="text-lg font-semibold text-white">{option.label}</Text>
-                                                <Text className="text-gray-400 mt-1">{option.hint}</Text>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </>
-                            )}
-                        />
-
-                        <TouchableOpacity onPress={prevStep} className="mt-2 p-4 items-center">
-                            <Text className="text-gray-500">Back</Text>
-                        </TouchableOpacity>
-                    </Animated.View>
-                );
-
-            case 6: // Training Schedule
-                return (
-                    <Animated.View entering={FadeInUp} exiting={FadeOutDown} className="flex-1 p-6">
-                        <View className="items-center mb-6">
-                            <Text className="text-2xl font-bold text-white text-center mb-1">Training Schedule</Text>
-                            <Text className="text-gray-400 text-center">How many days per week do you want to train?</Text>
-                        </View>
-
-                        <Controller
-                            control={control}
-                            name="training_days_preference"
-                            rules={{ required: true }}
-                            render={({ field: { onChange, value } }) => (
-                                <>
-                                    {[
-                                        { key: '2-3', label: '2–3 days', hint: 'Light, sustainable routine.' },
-                                        { key: '3-4', label: '3–4 days', hint: 'Balanced and flexible.' },
-                                        { key: '4-5', label: '4–5 days', hint: 'Higher volume focus.' },
-                                        { key: '5+', label: '5+ days', hint: 'Very active schedule.' }
-                                    ].map((option) => {
-                                        const isSelected = value === option.key;
-                                        return (
-                                            <TouchableOpacity
-                                                key={option.key}
-                                                onPress={() => onChange(option.key as OnboardingForm['training_days_preference'])}
-                                                className={`p-5 rounded-2xl mb-4 border ${isSelected ? 'border-blue-500 bg-blue-900/30' : 'border-gray-800 bg-gray-900'}`}
-                                            >
-                                                <Text className="text-lg font-semibold text-white">{option.label}</Text>
-                                                <Text className="text-gray-400 mt-1">{option.hint}</Text>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </>
-                            )}
-                        />
-
-                        <TouchableOpacity
-                            onPress={handleSubmit(onSubmit)}
-                            disabled={loading}
-                            className={`w-full bg-blue-600 p-4 rounded-2xl items-center mb-4 shadow-lg shadow-blue-500/20 ${loading ? 'opacity-70' : ''}`}
-                        >
-                            {loading ? <ActivityIndicator color="white" /> : <Text className="text-white font-bold text-lg">Finish Setup</Text>}
-                        </TouchableOpacity>
-
-                        <TouchableOpacity onPress={prevStep} className="p-4 items-center">
-                            <Text className="text-gray-500">Back</Text>
-                        </TouchableOpacity>
-                    </Animated.View>
-                );
-
-            default:
-                return null;
-        }
-    };
-
+    // ── Render ─────────────────────────────────────────────────────────
     return (
         <SafeAreaView className="flex-1 bg-gray-950">
-            <ScrollView ref={scrollRef} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-                <View className="px-6 pt-4">
-                    <View className="flex-row items-center justify-between">
-                        <Text className="text-sm text-gray-500">Step {step} of {totalSteps}</Text>
-                        <View className="flex-row gap-2">
-                            {Array.from({ length: totalSteps }).map((_, index) => (
-                                <View
-                                    key={index}
-                                    className={`h-1.5 w-6 rounded-full ${index + 1 <= step ? 'bg-blue-500' : 'bg-gray-800'}`}
-                                />
-                            ))}
-                        </View>
-                    </View>
+            {/* Progress bar */}
+            <View className="px-6 pt-4 pb-2">
+                <View className="flex-row items-center justify-between mb-3">
+                    {step > 0 ? (
+                        <TouchableOpacity onPress={goBack} hitSlop={12} className="flex-row items-center">
+                            <Ionicons name="chevron-back" size={20} color="#9ca3af" />
+                            <Text className="text-gray-400 text-sm ml-1">Back</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <View />
+                    )}
+                    <Text className="text-gray-500 text-xs font-medium">
+                        {step + 1} / {TOTAL_STEPS}
+                    </Text>
                 </View>
-                {renderStep()}
-            </ScrollView>
+                <View className="flex-row gap-2">
+                    {STEPS.map((_, i) => (
+                        <View
+                            key={i}
+                            className={`flex-1 h-1 rounded-full ${i <= step ? 'bg-blue-500' : 'bg-gray-800'}`}
+                        />
+                    ))}
+                </View>
+            </View>
+
+            {/* Step content */}
+            <Animated.View
+                key={currentStep.id}
+                entering={FadeInDown.duration(350)}
+                className="flex-1 px-6 pt-8"
+            >
+                {/* Title */}
+                <View className="mb-8">
+                    <Text className="text-3xl font-bold text-white mb-2">
+                        {currentStep.title}
+                    </Text>
+                    <Text className="text-gray-400 text-base leading-6">
+                        {currentStep.subtitle}
+                    </Text>
+                </View>
+
+                {/* Options */}
+                <View className="gap-3">
+                    {currentStep.options.map((option, idx) => {
+                        const isSelected = answers[currentStep.id] === option.key;
+                        return (
+                            <Animated.View
+                                key={option.key}
+                                entering={FadeInDown.delay(idx * 60).duration(300)}
+                            >
+                                <TouchableOpacity
+                                    activeOpacity={0.7}
+                                    onPress={() => selectOption(option.key)}
+                                    className={`flex-row items-center p-4 rounded-2xl border ${
+                                        isSelected
+                                            ? 'border-blue-500 bg-blue-600/15'
+                                            : 'border-gray-800 bg-gray-900'
+                                    }`}
+                                >
+                                    <View
+                                        className={`w-11 h-11 rounded-xl items-center justify-center mr-4 ${
+                                            isSelected ? 'bg-blue-600/30' : 'bg-gray-800'
+                                        }`}
+                                    >
+                                        <Ionicons
+                                            name={option.icon}
+                                            size={22}
+                                            color={isSelected ? '#60a5fa' : '#9ca3af'}
+                                        />
+                                    </View>
+                                    <View className="flex-1">
+                                        <Text className={`text-base font-semibold ${isSelected ? 'text-white' : 'text-gray-200'}`}>
+                                            {option.label}
+                                        </Text>
+                                        <Text className="text-gray-500 text-sm mt-0.5">
+                                            {option.hint}
+                                        </Text>
+                                    </View>
+                                    {isSelected && (
+                                        <View className="w-6 h-6 rounded-full bg-blue-600 items-center justify-center">
+                                            <Ionicons name="checkmark" size={16} color="white" />
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                            </Animated.View>
+                        );
+                    })}
+                </View>
+            </Animated.View>
+
+            {/* Bottom CTA — only on last step */}
+            {isLastStep && canAdvance && (
+                <Animated.View entering={FadeInUp.duration(300)} className="px-6 pb-4">
+                    <TouchableOpacity
+                        onPress={finish}
+                        disabled={saving}
+                        activeOpacity={0.8}
+                        className={`bg-blue-600 py-4 rounded-2xl items-center shadow-lg shadow-blue-500/30 ${saving ? 'opacity-70' : ''}`}
+                    >
+                        {saving ? (
+                            <ActivityIndicator color="white" />
+                        ) : (
+                            <Text className="text-white font-bold text-lg">Get Started</Text>
+                        )}
+                    </TouchableOpacity>
+                </Animated.View>
+            )}
         </SafeAreaView>
     );
 }

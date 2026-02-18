@@ -37,7 +37,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       ]);
 
       setMetadata({
-        profile,
         activePlan: plan,
         recentActivity: dashboardData?.recentActivity || [],
         exercises: exercises.map((e: any) => ({ id: e.id, name: e.name, category: e.category })),
@@ -49,7 +48,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setContextLoading(false);
     }
-  }, [user, profile]);
+  }, [user]);
 
   // Auto-fetch on login / app start
   useEffect(() => {

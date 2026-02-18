@@ -289,8 +289,8 @@ export default function Chat() {
 
             if (allCanonicalNames.length > 0) {
                 // Get user equipment from profile
-                const userEquipment = metadata?.profile?.available_equipment || [];
-                const userDifficulty = metadata?.profile?.fitness_level || 'intermediate';
+                const userEquipment = profile?.available_equipment || [];
+                const userDifficulty = profile?.fitness_level || 'intermediate';
 
                 try {
                     // Batch fetch all variants at once (efficient!)
@@ -528,7 +528,7 @@ export default function Chat() {
                 new Date(w.completed_at) >= thisWeekStart
             ).length;
 
-            const targetDays = data.profile?.training_days_per_week || 4;
+            const targetDays = profile?.training_days_per_week || 4;
             const dayOfWeek = new Date().getDay();
             const expectedByNow = Math.floor((dayOfWeek / 7) * targetDays);
 
@@ -680,8 +680,21 @@ CRITICAL BEHAVIOR RULES:
 5. When the user asks about their plan/routine/schedule, use the ACTIVE PLAN DATA below or the get_active_plan tool.
 6. You have data about the user already loaded below. Use it to answer questions directly when possible - only call tools for data you don't already have.
 
-USER PROFILE: ${JSON.stringify(metadata?.profile || {})}
-USER'S AVAILABLE EQUIPMENT: ${JSON.stringify(metadata?.profile?.available_equipment || [])}
+USER PROFILE:
+- Name: ${profile?.display_name || 'Unknown'}
+- Primary Goal: ${profile?.primary_goal || 'Not set'}
+- Fitness Level: ${profile?.fitness_level || 'Not set'}
+- Training Days Per Week: ${profile?.training_days_per_week || 'Not set'}
+- Available Equipment: ${(profile?.available_equipment || []).join(', ') || 'Not specified'}
+- Height: ${profile?.height_cm ? profile.height_cm + ' cm' : 'Not set'}
+- Weight: ${profile?.weight_kg ? profile.weight_kg + ' kg' : 'Not set'}
+- Birth Date: ${profile?.birth_date || 'Not set'}
+- Gender: ${profile?.gender || 'Not set'}
+- Session Duration: ${profile?.session_duration_minutes ? profile.session_duration_minutes + ' min' : 'Not set'}
+- Injuries/Limitations: ${profile?.injuries_or_limitations || 'None'}
+- Exercise Dislikes: ${profile?.exercise_dislikes || 'None'}
+
+IMPORTANT: Always tailor your advice to the user's goal (${profile?.primary_goal || 'general fitness'}), experience level (${profile?.fitness_level || 'intermediate'}), available equipment (${(profile?.available_equipment || []).join(', ') || 'full gym'}), and training frequency (${profile?.training_days_per_week || 4} days/week). Never suggest exercises that require equipment the user doesn't have.
 
 ACTIVE PLAN DATA:
 ${metadata?.activePlan ? JSON.stringify({

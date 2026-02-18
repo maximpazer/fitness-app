@@ -26,26 +26,24 @@ function RootLayoutNav() {
     if (loading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const onOnboarding = segments[0] === 'onboarding';
     const user = session?.user;
 
     const isProfileComplete = !!(profile?.fitness_level && profile?.primary_goal && profile?.training_days_per_week);
-    const needsOnboarding = false; // Disabled onboarding
 
     if (!user) {
       if (!inAuthGroup) router.replace('/(auth)/login');
       return;
     }
 
-    // Authenticated
-    if (needsOnboarding && segments[0] !== 'onboarding') {
+    // Authenticated — auto-redirect to onboarding if profile is incomplete
+    if (!isProfileComplete && !onOnboarding) {
       router.replace('/onboarding');
       return;
     }
 
-    if (!needsOnboarding && segments[0] === 'onboarding') {
-      router.replace('/(tabs)');
-      return;
-    }
+    // Let users navigate to onboarding manually (e.g. from settings)
+    // so do NOT redirect away from onboarding when profile is complete.
 
     if (inAuthGroup) {
       router.replace('/(tabs)');
