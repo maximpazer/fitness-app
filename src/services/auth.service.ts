@@ -1,4 +1,17 @@
 import { supabase } from '@/lib/supabase'
+import { Platform } from 'react-native'
+
+const getRedirectUrl = () => {
+    if (Platform.OS === 'web') {
+        // Use current origin in browser (works for both localhost and production)
+        if (typeof window !== 'undefined') {
+            return window.location.origin
+        }
+        return 'https://maxum225-fitness.expo.app'
+    }
+    // For native apps, use the Expo scheme
+    return 'fitness://'
+}
 
 export const authService = {
     async signUp(email: string, password: string, displayName: string) {
@@ -9,6 +22,7 @@ export const authService = {
                 data: {
                     display_name: displayName,
                 },
+                emailRedirectTo: getRedirectUrl(),
             },
         })
         return { data, error }

@@ -37,6 +37,7 @@ export class AnalyticCoach implements WorkoutCoach {
     }
 
     private formatSummary(data: any) {
+        if (!data.exercises || !Array.isArray(data.exercises)) return '';
         return data.exercises.map((ex: any) => {
             const completed = ex.sets.filter((s: any) => s.is_completed);
             if (completed.length === 0) return null;

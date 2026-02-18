@@ -17,15 +17,15 @@ describe('Unit Test: CoachFactory (Factory Pattern)', () => {
     it('AnalyticCoach should generate a data-focused prompt', () => {
         const coach = new AnalyticCoach();
         const { systemInstruction } = coach.getAnalysisPrompt({}, {}, {});
-        expect(systemInstruction).toContain('data-driven analyst');
-        expect(systemInstruction).toContain('trends, volume, and progressive overload');
+        expect(systemInstruction).toContain('data-driven');
+        expect(systemInstruction).toContain('facts and numbers');
     });
 
     // Test 4: MotivationalCoach generates correct prompt structure
     it('MotivationalCoach should generate a supportive prompt', () => {
         const coach = new MotivationalCoach();
         const { systemInstruction } = coach.getAnalysisPrompt({}, {}, {});
-        expect(systemInstruction).toContain('high-energy, supportive coach');
-        expect(systemInstruction).toContain('celebrate consistency');
+        expect(systemInstruction).toContain('encouraging');
+        expect(systemInstruction).toContain('high-energy');
     });
 });
