@@ -1,19 +1,17 @@
+import { useAIChatContext } from '@/context/AIChatContext';
 import { useAuthContext } from '@/context/AuthContext';
 import { usePlan } from '@/context/PlanContext';
 import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { ChatMessage, generateOpenAIContentWithTools } from '@/lib/openai';
 import { AI_TOOLS, aiToolsService } from '@/services/ai-tools.service';
 import { canonicalExerciseService } from '@/services/canonical-exercise.service';
-import { dashboardService } from '@/services/dashboard.service';
 import { exerciseService } from '@/services/exercise.service';
-import { metricsService } from '@/services/metrics.service';
 import { plannerService } from '@/services/planner.service';
-import { workoutService } from '@/services/workout.service';
 import { Ionicons } from '@expo/vector-icons';
 import { format, startOfWeek } from 'date-fns';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, FlatList, KeyboardAvoidingView, NativeSyntheticEvent, Platform, ScrollView, Text, TextInput, TextInputKeyPressEventData, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Message = {
@@ -193,21 +191,22 @@ const InsightCard = ({ insight, onDismiss }: { insight: AutoInsight; onDismiss: 
 
 export default function Chat() {
     const { user, profile } = useAuthContext();
+    const { metadata, contextLoading, refreshContext } = useAIChatContext();
     const { refreshPlan } = usePlan();
     const { showDialog } = useConfirmDialog();
     const insets = useSafeAreaInsets();
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
-    const [contextLoading, setContextLoading] = useState(true);
-    const [metadata, setMetadata] = useState<any>(null);
+    const [loadingStatus, setLoadingStatus] = useState({ title: 'Thinking...', subtitle: '' });
     const [autoInsight, setAutoInsight] = useState<AutoInsight | null>(null);
     const [showQuickActions, setShowQuickActions] = useState(true);
     const flatListRef = useRef<FlatList>(null);
+    const inputRef = useRef<TextInput>(null);
     const { mode } = useLocalSearchParams();
 
-    // Tab bar height (approximate for iOS with safe area)
-    const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 88 : 60;
+    // Tab bar content height (excludes safe area inset, which is handled separately)
+    const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 50 : 60;
 
     // Shared helpers
     const cleanJson = (str: string) => {
@@ -458,11 +457,12 @@ export default function Chat() {
         };
     };
 
+    // Generate insight when context finishes loading
     useEffect(() => {
-        if (user) {
-            loadContext();
+        if (!contextLoading && metadata) {
+            generateAutoInsight(metadata).then(setAutoInsight);
         }
-    }, [user]);
+    }, [contextLoading, metadata]);
 
     useEffect(() => {
         if (mode === 'generate_plan' && messages.length === 0) {
@@ -627,37 +627,16 @@ export default function Chat() {
         return null;
     }, []);
 
-    const loadContext = async () => {
-        try {
-            setContextLoading(true);
-            const [plan, dashboardData, exercises, weightTrend, detailedHistory] = await Promise.all([
-                plannerService.getActivePlan(user!.id),
-                dashboardService.getDashboardData(user!.id),
-                exerciseService.getExercises(),
-                metricsService.getWeightTrend(user!.id, 4), // Last 4 weeks
-                workoutService.getDetailedRecentHistory(user!.id, 5) // Last 5 workouts with sets/reps
-            ]);
-
-            const contextData = {
-                profile,
-                activePlan: plan,
-                recentActivity: dashboardData?.recentActivity || [],
-                exercises: exercises.map((e: any) => ({ id: e.id, name: e.name, category: e.category })),
-                weightHistory: weightTrend,
-                detailedHistory: detailedHistory
-            };
-
-            setMetadata(contextData);
-
-            // Generate auto insight after loading context
-            const insight = await generateAutoInsight(contextData);
-            setAutoInsight(insight);
-        } catch (e) {
-            console.error("Error loading chat context:", e);
-        } finally {
-            setContextLoading(false);
+    // Handle Enter key press on web to send message
+    const handleKeyPress = useCallback((e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+        if (e.nativeEvent.key === 'Enter' && !loading) {
+            e.preventDefault?.();
+            sendMessageRef.current();
         }
-    };
+    }, [loading]);
+
+    // Keep a ref to sendMessage so handleKeyPress always calls the latest version
+    const sendMessageRef = useRef<() => void>(() => {});
 
     const handleQuickAction = (action: QuickAction) => {
         setShowQuickActions(false);
@@ -673,6 +652,7 @@ export default function Chat() {
 
     const sendMessageWithHistory = async (newMessages: Message[]) => {
         setLoading(true);
+        setLoadingStatus({ title: 'Thinking...', subtitle: 'Processing your message' });
 
         try {
             // System prompt for the AI coach - tool-mediated reasoning
@@ -680,6 +660,7 @@ export default function Chat() {
 You are an expert AI Fitness Coach. You have tools to query summarized user data and search for exercises.
 
 AVAILABLE TOOLS:
+- get_active_plan: Get the user's current active training plan with all days, exercises, sets, and reps.
 - get_recent_workout_summary: Summarized overview (volume, frequency, muscles) for N days
 - get_last_session_overview: Last workout summary (exercises, sets, volume)
 - get_exercise_progress: Trend data for specific exercise (weight/volume/reps)
@@ -696,10 +677,49 @@ CRITICAL BEHAVIOR RULES:
 2. For general questions, advice, progress queries - just answer conversationally. Do NOT create a plan.
 3. Use appropriate tools based on what the user actually asks.
 4. Be concise and coaching-focused.
+5. When the user asks about their plan/routine/schedule, use the ACTIVE PLAN DATA below or the get_active_plan tool.
+6. You have data about the user already loaded below. Use it to answer questions directly when possible - only call tools for data you don't already have.
 
 USER PROFILE: ${JSON.stringify(metadata?.profile || {})}
 USER'S AVAILABLE EQUIPMENT: ${JSON.stringify(metadata?.profile?.available_equipment || [])}
-ACTIVE PLAN: ${JSON.stringify(metadata?.activePlan?.name || "No active plan")}
+
+ACTIVE PLAN DATA:
+${metadata?.activePlan ? JSON.stringify({
+    name: metadata.activePlan.name,
+    description: metadata.activePlan.description,
+    duration_weeks: metadata.activePlan.duration_weeks,
+    total_days: metadata.activePlan.days?.length || 0,
+    days: metadata.activePlan.days?.map((day: any) => ({
+        day_number: day.day_number,
+        day_name: day.day_name,
+        day_type: day.day_type || 'training',
+        exercises: day.exercises?.map((ex: any) => ({
+            name: ex.exercise?.name || 'Unknown',
+            category: ex.exercise?.category,
+            target_sets: ex.target_sets,
+            target_reps: ex.target_reps_min && ex.target_reps_max
+                ? `${ex.target_reps_min}-${ex.target_reps_max}`
+                : ex.target_reps_min || 'N/A',
+            rest_seconds: ex.rest_seconds,
+        })) || [],
+    })) || [],
+}, null, 2) : '"No active plan"'}
+
+RECENT WORKOUT HISTORY (last 5 sessions):
+${metadata?.detailedHistory?.length > 0 ? JSON.stringify(metadata.detailedHistory.map((w: any) => ({
+    date: w.completed_at,
+    name: w.workout_name,
+    duration_minutes: w.duration_minutes,
+    exercises: w.workout_exercises?.map((we: any) => ({
+        name: we.exercise?.name,
+        sets: we.sets?.filter((s: any) => !s.is_warmup)?.map((s: any) => ({
+            weight_kg: s.weight_kg,
+            reps: s.reps,
+        })),
+    })),
+})), null, 2) : '"No recent workouts"'}
+
+BODY WEIGHT TREND: ${JSON.stringify(metadata?.weightHistory || 'No data')}
 
 SEARCH & PLAN CREATION WORKFLOW (CRITICAL - NO EXCEPTIONS):
 
@@ -778,6 +798,22 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                 if (response.functionCall) {
                     // Log only tool name (no reasoning text stored)
                     if (__DEV__) console.log(`[Tool] ${response.functionCall.name}`);
+
+                    // Update loading status based on the tool being called
+                    const toolStatusMap: Record<string, { title: string; subtitle: string }> = {
+                        get_recent_workout_summary: { title: 'Reviewing workouts...', subtitle: 'Summarizing recent training data' },
+                        get_last_session_overview: { title: 'Checking last session...', subtitle: 'Loading your latest workout' },
+                        get_exercise_progress: { title: 'Tracking progress...', subtitle: `Analyzing ${response.functionCall.args?.exercise_name || 'exercise'} trends` },
+                        get_exercise_consistency: { title: 'Checking consistency...', subtitle: `How regular is your ${response.functionCall.args?.exercise_name || 'training'}` },
+                        get_muscle_group_coverage: { title: 'Scanning muscle groups...', subtitle: 'Checking for imbalances' },
+                        compare_workout_periods: { title: 'Comparing periods...', subtitle: 'Crunching the numbers' },
+                        get_last_exercise_load: { title: 'Looking up loads...', subtitle: `Finding last weight for ${response.functionCall.args?.exercise_name || 'exercise'}` },
+                        get_body_metrics_trend: { title: 'Checking body metrics...', subtitle: 'Analyzing weight trends' },
+                        get_active_plan: { title: 'Loading your plan...', subtitle: 'Fetching training schedule' },
+                        search_exercises: { title: 'Searching exercises...', subtitle: `"${(response.functionCall.args?.query || '').slice(0, 40)}"` },
+                        create_plan_proposal: { title: 'Building your plan...', subtitle: 'Assembling workout program' },
+                    };
+                    setLoadingStatus(toolStatusMap[response.functionCall.name] || { title: 'Working...', subtitle: response.functionCall.name });
 
                     // Detect search loop - if we've searched 5 times without creating a plan, force a response
                     if (response.functionCall.name === 'search_exercises') {
@@ -973,11 +1009,18 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
         const userMsg = input;
         setInput('');
         setShowQuickActions(false);
+        // Re-focus input after sending (web)
+        setTimeout(() => inputRef.current?.focus(), 50);
 
         const newMessages: Message[] = [...messages, { role: 'user', content: userMsg }];
         setMessages(newMessages);
         await sendMessageWithHistory(newMessages);
     };
+
+    // Keep sendMessageRef in sync
+    useEffect(() => {
+        sendMessageRef.current = sendMessage;
+    });
 
     const handleApplyProposal = async (proposal: any) => {
         if (!user) return;
@@ -1036,7 +1079,7 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                             await plannerService.createPlan(user.id, finalProposal, 'ai_update');
 
                             showDialog("Success", isUpdate ? "New version created and activated!" : "New plan created and activated!");
-                            loadContext(); // Refresh context
+                            refreshContext(); // Refresh context
                             refreshPlan(); // Notify global context so dashboard updates
                         } catch (e: any) {
                             console.error("Error applying proposal:", e);
@@ -1071,7 +1114,7 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                                 </View>
                             </View>
                             <TouchableOpacity
-                                onPress={loadContext}
+                                onPress={refreshContext}
                                 disabled={contextLoading}
                                 className={`w-10 h-10 bg-gray-900 rounded-full items-center justify-center border border-gray-800 ${contextLoading ? 'opacity-50' : ''}`}
                             >
@@ -1216,8 +1259,10 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                                         <ActivityIndicator size="small" color="#3b82f6" />
                                     </View>
                                     <View>
-                                        <Text className="text-gray-300 text-sm font-medium">Analyzing your data...</Text>
-                                        <Text className="text-gray-500 text-xs mt-0.5">Querying workout history</Text>
+                                        <Text className="text-gray-300 text-sm font-medium">{loadingStatus.title}</Text>
+                                        {loadingStatus.subtitle ? (
+                                            <Text className="text-gray-500 text-xs mt-0.5" numberOfLines={1}>{loadingStatus.subtitle}</Text>
+                                        ) : null}
                                     </View>
                                 </View>
                             </View>
@@ -1227,24 +1272,21 @@ Current Date: ${format(new Date(), 'yyyy-MM-dd')}
                     {/* Input Field - Fixed at bottom with proper tab bar offset */}
                     <View
                         className="px-4 pt-3 pb-2 bg-gray-950 border-t border-gray-800"
-                        style={{ paddingBottom: Math.max(TAB_BAR_HEIGHT + 8, insets.bottom + TAB_BAR_HEIGHT) }}
+                        style={{ paddingBottom: Platform.OS === 'ios' ? TAB_BAR_HEIGHT + insets.bottom : 8 }}
                     >
                         <View className="flex-row items-end bg-gray-900 rounded-2xl px-4 py-2 border border-gray-800">
                             <TextInput
+                                ref={inputRef}
                                 className="flex-1 py-2 text-white text-base"
                                 placeholder="Ask about your progress, plan..."
                                 placeholderTextColor="#6b7280"
                                 value={input}
                                 onChangeText={setInput}
-                                multiline
                                 maxLength={500}
                                 style={{ maxHeight: 100, minHeight: 24 }}
                                 returnKeyType="send"
-                                onSubmitEditing={(e) => {
-                                    if (Platform.OS !== 'web') {
-                                        sendMessage();
-                                    }
-                                }}
+                                onSubmitEditing={() => sendMessage()}
+                                onKeyPress={Platform.OS === 'web' ? handleKeyPress : undefined}
                                 blurOnSubmit={true}
                                 enablesReturnKeyAutomatically={true}
                             />

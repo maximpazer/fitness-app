@@ -15,15 +15,21 @@ export default function TabLayout() {
     <View style={{ flex: 1 }}>
       <Tabs
         screenOptions={{
-          tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+          tabBarActiveTintColor: Colors.dark.tint,
+          tabBarInactiveTintColor: Colors.dark.tabIconDefault,
           headerShown: false,
           tabBarButton: HapticTab,
           tabBarStyle: Platform.select({
             ios: {
               // Use a transparent background on iOS to show the BlurView
               position: 'absolute',
+              backgroundColor: '#030712',
+              borderTopColor: '#1f2937',
             },
-            default: {},
+            default: {
+              backgroundColor: '#030712',
+              borderTopColor: '#1f2937',
+            },
           }),
         }}>
         <Tabs.Screen

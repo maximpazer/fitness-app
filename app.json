@@ -24,7 +24,7 @@
       "package": "com.anonymous.fitness"
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -45,6 +45,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b81c0883-2b32-418b-a64f-2da218c6ac1c"
+      }
     }
   }
 }

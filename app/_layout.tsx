@@ -2,13 +2,14 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 import '../global.css';
 
 import { WorkoutLoggerOverlay } from '@/components/WorkoutLoggerOverlay';
 import { AuthProvider, useAuthContext } from '@/context/AuthContext';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { NumericKeypadProvider } from '@/context/NumericKeypadContext';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export const unstable_settings = {
@@ -53,7 +54,11 @@ function RootLayoutNav() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      {!loading && (
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colorScheme === 'dark' ? '#000' : '#fff' }}>
+          <ActivityIndicator size="large" color={colorScheme === 'dark' ? '#fff' : '#3b82f6'} />
+        </View>
+      ) : (
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
@@ -69,6 +74,7 @@ function RootLayoutNav() {
   );
 }
 
+import { AIChatProvider } from '@/context/AIChatContext';
 import { PlanProvider } from '@/context/PlanContext';
 import { WorkoutProvider } from '@/context/WorkoutContext';
 import { DialogProvider } from '@/hooks/useConfirmDialog';
@@ -78,7 +84,9 @@ function AppProviders({ children }: { children: React.ReactNode }) {
   const { session } = useAuthContext();
   return (
     <PlanProvider userId={session?.user?.id || null}>
-      {children}
+      <AIChatProvider>
+        {children}
+      </AIChatProvider>
     </PlanProvider>
   );
 }

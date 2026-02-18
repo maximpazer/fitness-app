@@ -11,6 +11,7 @@
  */
 
 import { supabase } from '@/lib/supabase';
+import { plannerService } from '@/services/planner.service';
 import { differenceInDays, format, startOfWeek, subDays } from 'date-fns';
 
 // Tool definitions for Gemini function calling
@@ -159,6 +160,15 @@ export const AI_TOOLS = {
             },
         },
         {
+            name: 'get_active_plan',
+            description: 'Get the user\'s current active training plan with all days, exercises, sets, and reps. Use this when the user asks about their plan, routine, or schedule.',
+            parameters: {
+                type: 'object',
+                properties: {},
+                required: [],
+            },
+        },
+        {
             name: 'search_exercises',
             description: 'Search for exercises using semantic search. REQUIRED for plan creation. Understands natural language queries like \'calisthenics back exercises\', \'explosive leg movements\', \'dumbbell chest isolation\'. Returns exercises with valid UUIDs needed for create_plan_proposal.',
             parameters: {
@@ -243,6 +253,33 @@ export const AI_TOOLS = {
     ],
 };
 
+// Helper to format plan for AI consumption
+const formatPlanForAI = (plan: any): any => {
+    if (!plan) return { status: 'no_active_plan', message: 'User has no active training plan.' };
+
+    return {
+        name: plan.name,
+        description: plan.description,
+        duration_weeks: plan.duration_weeks,
+        created_at: plan.created_at,
+        total_days: plan.days?.length || 0,
+        days: plan.days?.map((day: any) => ({
+            day_number: day.day_number,
+            day_name: day.day_name,
+            day_type: day.day_type || 'training',
+            exercises: day.exercises?.map((ex: any) => ({
+                name: ex.exercise?.name || 'Unknown',
+                category: ex.exercise?.category,
+                target_sets: ex.target_sets,
+                target_reps: ex.target_reps_min && ex.target_reps_max
+                    ? `${ex.target_reps_min}-${ex.target_reps_max}`
+                    : ex.target_reps_min || 'N/A',
+                rest_seconds: ex.rest_seconds,
+            })) || [],
+        })) || [],
+    };
+};
+
 // Helper to parse period strings to days
 const periodToDays = (period: string): number => {
     const map: Record<string, number> = {
@@ -282,6 +319,8 @@ const getPeriodDateRange = (period: string): { start: Date; end: Date } => {
 export const aiToolsService = {
     async executeFunction(userId: string, functionName: string, args: any): Promise<any> {
         switch (functionName) {
+            case 'get_active_plan':
+                return this.getActivePlan(userId);
             case 'search_exercises':
                 // Only semantic search for plan creation
                 return this.searchExercisesSemantic(args);
@@ -859,6 +898,19 @@ export const aiToolsService = {
             weekly_avg_change: Math.round((change / (days / 7)) * 10) / 10,
             trend: change > 0.5 ? 'gaining' : change < -0.5 ? 'losing' : 'stable',
         };
+    },
+
+    /**
+     * Get user's active training plan with full details
+     */
+    async getActivePlan(userId: string) {
+        try {
+            const plan = await plannerService.getActivePlan(userId);
+            return formatPlanForAI(plan);
+        } catch (e: any) {
+            console.error('[getActivePlan] Error:', e);
+            return { error: 'Failed to fetch active plan', details: e.message };
+        }
     },
 
     /**
